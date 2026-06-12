@@ -1,0 +1,11 @@
+## Interface: 11508
+## Title: WoW Experimental Playground
+## Notes: Experimental WoW Classic addon features, challenges, roleplay tools, and shared addon communication.
+## Author: Boshko Sokolov
+## Version: 0.1.0
+## SavedVariables: WEPDB
+
+Core.lua
+Comm\Protocol.lua
+Comm\Transport.lua
+Features\Diagnostics.lua

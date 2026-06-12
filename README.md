@@ -13,7 +13,7 @@ This project is intentionally open-ended. Some features may become polished addo
 
 ## Status
 
-Early scaffold. No addon files have been implemented yet.
+Early scaffold with a v1 hidden addon communication bus.
 
 ## Planned Addon Shape
 
@@ -23,15 +23,27 @@ The addon will likely start with a small core and feature folders:
 WoW_Experimental_Playground/
   WoW_Experimental_Playground.toc
   Core.lua
+  Comm/
   Features/
-  UI/
 ```
 
 This may change as the project finds its direction.
 
+## Communication Diagnostics
+
+The addon includes a small hidden communication diagnostic feature:
+
+```text
+/wep comm status
+/wep comm ping
+/wep comm debug
+```
+
+`/wep comm ping` sends a hidden discovery-channel ping. Other players with the addon respond with a `PONG` after a short randomized delay.
+
 ## Installation
 
-Once addon files exist:
+To install during development:
 
 1. Copy the addon folder into your WoW Classic addons directory.
 2. Make sure the folder name matches the `.toc` file name.
@@ -48,4 +60,5 @@ World of Warcraft\_classic_era_\Interface\AddOns\WoW_Experimental_Playground
 - Target WoW Classic first.
 - Keep experimental features isolated where possible.
 - Avoid relying on other addons unless a feature explicitly integrates with one.
+- Hidden addon channels are for coordination, not security. Treat received payloads as untrusted.
 - Update this README as actual features, commands, and install details are added.
