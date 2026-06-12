@@ -82,6 +82,14 @@ These guidelines are working when diffs contain fewer unnecessary changes, rewri
 - Keep feature code isolated where practical, especially for experimental mechanics.
 - Add short comments only when they explain behavior that is not obvious from the code.
 
+## Shared Architecture
+
+- Put pure, stateless helpers in `Utils/`. These helpers should not call WoW APIs or manage runtime state.
+- Put reusable WoW-facing services in `Tools/`. These modules may call WoW APIs, handle timers, inspect player state, or perform controlled side effects.
+- Put feature behavior in `Features/`. Feature modules should use existing `Utils` and `Tools` instead of creating private helper copies.
+- Keep domain-specific protocol and transport behavior inside its owning module, such as `Comm/Protocol.lua` or `Comm/Transport.lua`.
+- Load order matters: `Core.lua` first, then `Utils/`, then `Tools/`, then feature/runtime modules.
+
 ## Addon Compatibility
 
 - Target WoW Classic unless a feature explicitly says otherwise.
@@ -101,6 +109,9 @@ These guidelines are working when diffs contain fewer unnecessary changes, rewri
 WoW_Experimental_Playground/
   WoW_Experimental_Playground.toc
   Core.lua
+  Utils/
+  Tools/
+  Comm/
   Features/
     Challenges/
     Roleplay/

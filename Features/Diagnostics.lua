@@ -6,34 +6,13 @@ local Diagnostics = {
 
 WEP.Diagnostics = Diagnostics
 
-local function now()
-	if GetServerTime then
-		return GetServerTime()
-	end
-
-	if time then
-		return time()
-	end
-
-	return 0
-end
-
-local function after(delay, callback)
-	if C_Timer and C_Timer.After then
-		C_Timer.After(delay, callback)
-	else
-		callback()
-	end
-end
-
-local function trim(value)
-	return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
-end
+local Timer = WEP.Tools.Timer
+local Text = WEP.Utils.Text
 
 local function splitCommand(input)
 	local args = {}
 
-	for word in trim(input):gmatch("%S+") do
+	for word in Text.Trim(input):gmatch("%S+") do
 		args[#args + 1] = string.lower(word)
 	end
 
@@ -155,13 +134,13 @@ function Diagnostics:SendPing()
 	end
 
 	self.pendingPings[messageIdOrErr] = {
-		sentAt = now(),
+		sentAt = Timer.Now(),
 		responses = 0,
 	}
 
 	WEP:Print("PING queued on hidden discovery channel.")
 
-	after(5, function()
+	Timer.After(5, function()
 		local pendingPing = self.pendingPings[messageIdOrErr]
 
 		if pendingPing then
@@ -179,7 +158,7 @@ function Diagnostics.OnPing(_, message)
 
 	local delay = 0.2 + (math.random() * 0.8)
 
-	after(delay, function()
+	Timer.After(delay, function()
 		WEP.Comm:Send("PONG", {
 			replyTo = message.id,
 		}, {

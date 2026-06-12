@@ -23,7 +23,6 @@ local MAX_QUEUE_SIZE = 50
 local SEND_INTERVAL_SECONDS = 0.35
 local SEEN_MESSAGE_TTL_SECONDS = 300
 local CHANNEL_RETRY_LIMIT = 2
-local HASH_MODULO = 4294967296
 local OLD_DISCOVERY_CHANNEL_PATTERN = "^wep%x%x%x%x%x%x%x%x$"
 
 local VALID_ADDON_DISTRIBUTIONS = {
@@ -33,48 +32,10 @@ local VALID_ADDON_DISTRIBUTIONS = {
 	WHISPER = true,
 }
 
-local function now()
-	if GetServerTime then
-		return GetServerTime()
-	end
-
-	if time then
-		return time()
-	end
-
-	return 0
-end
-
-local function after(delay, callback)
-	if C_Timer and C_Timer.After then
-		C_Timer.After(delay, callback)
-	else
-		callback()
-	end
-end
-
-local function normalizeRealmName(realmName)
-	if not realmName or realmName == "" then
-		return "UnknownRealm"
-	end
-
-	return (tostring(realmName):gsub("%s+", ""))
-end
-
-local function getRealmToken()
-	if GetNormalizedRealmName then
-		local normalizedRealmName = GetNormalizedRealmName()
-		if normalizedRealmName and normalizedRealmName ~= "" then
-			return normalizeRealmName(normalizedRealmName)
-		end
-	end
-
-	if GetRealmName then
-		return normalizeRealmName(GetRealmName())
-	end
-
-	return "UnknownRealm"
-end
+local Timer = WEP.Tools.Timer
+local Player = WEP.Tools.Player
+local ChatChannels = WEP.Tools.ChatChannels
+local Hash = WEP.Utils.Hash
 
 local function getDateParts()
 	if C_DateAndTime and C_DateAndTime.GetCurrentCalendarTime then
@@ -94,48 +55,6 @@ local function getDateParts()
 	return 1970, 1, 1
 end
 
-local function hashText(text)
-	local hash = 5381
-
-	for i = 1, #text do
-		hash = ((hash * 33) + text:byte(i)) % HASH_MODULO
-	end
-
-	return string.format("%08x", hash)
-end
-
-local function normalizeChannelName(channelName)
-	if not channelName then
-		return nil
-	end
-
-	local normalized = tostring(channelName):match("^%d+%.%s*(.+)$") or tostring(channelName)
-	return string.lower(normalized)
-end
-
-local function getChannelId(channelName)
-	if not GetChannelName then
-		return 0
-	end
-
-	local channelId = GetChannelName(channelName)
-	if type(channelId) == "number" then
-		return channelId
-	end
-
-	return 0
-end
-
-local function buildChannelLookup(channelNames)
-	local lookup = {}
-
-	for _, channelName in ipairs(channelNames) do
-		lookup[normalizeChannelName(channelName)] = true
-	end
-
-	return lookup
-end
-
 function Comm:Initialize()
 	if self.initialized then
 		return
@@ -148,7 +67,7 @@ function Comm:Initialize()
 	end)
 
 	self.channelNames = self:GenerateDiscoveryChannels()
-	self.channelLookup = buildChannelLookup(self.channelNames)
+	self.channelLookup = ChatChannels.BuildLookup(self.channelNames)
 
 	if WEP.db.comm.enabled then
 		self.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -166,7 +85,7 @@ function Comm:Initialize()
 end
 
 function Comm.GenerateDiscoveryChannels()
-	local realmToken = getRealmToken()
+	local realmToken = Player.GetRealmToken()
 	local year, month, day = getDateParts()
 	local dateKeys = {
 		string.format("%04d-%02d-%02d", year, month, day),
@@ -185,7 +104,7 @@ function Comm.GenerateDiscoveryChannels()
 	end
 
 	for _, dateKey in ipairs(dateKeys) do
-		addChannel("wep" .. hashText(realmToken .. "|" .. dateKey))
+		addChannel("wep" .. Hash.Hex8(realmToken .. "|" .. dateKey))
 	end
 
 	addChannel(DISCOVERY_FALLBACK_CHANNEL)
@@ -219,7 +138,7 @@ function Comm:CleanupOldDiscoveryChannels()
 
 	for i = 1, maxChannels do
 		local _, channelName = GetChannelName(i)
-		local normalizedChannelName = normalizeChannelName(channelName)
+		local normalizedChannelName = ChatChannels.NormalizeName(channelName)
 
 		if normalizedChannelName
 			and normalizedChannelName:match(OLD_DISCOVERY_CHANNEL_PATTERN)
@@ -235,7 +154,7 @@ function Comm:RefreshJoinedChannels()
 	self.activeChannel = nil
 
 	for _, channelName in ipairs(self.channelNames) do
-		local channelId = getChannelId(channelName)
+		local channelId = ChatChannels.GetId(channelName)
 
 		if channelId > 0 then
 			self.joinedChannels[channelName] = channelId
@@ -248,21 +167,7 @@ function Comm:RefreshJoinedChannels()
 end
 
 function Comm:HideDiscoveryChannels()
-	if not ChatFrame_RemoveChannel then
-		return
-	end
-
-	local windowCount = NUM_CHAT_WINDOWS or 10
-
-	for i = 1, windowCount do
-		local chatFrame = _G["ChatFrame" .. i]
-
-		if chatFrame then
-			for _, channelName in ipairs(self.channelNames) do
-				ChatFrame_RemoveChannel(chatFrame, channelName)
-			end
-		end
-	end
+	ChatChannels.HideFromFrames(self.channelNames)
 end
 
 function Comm:JoinDiscoveryChannels()
@@ -276,17 +181,17 @@ function Comm:JoinDiscoveryChannels()
 	end
 
 	self.channelNames = self:GenerateDiscoveryChannels()
-	self.channelLookup = buildChannelLookup(self.channelNames)
+	self.channelLookup = ChatChannels.BuildLookup(self.channelNames)
 
 	self:CleanupOldDiscoveryChannels()
 
 	for _, channelName in ipairs(self.channelNames) do
-		if getChannelId(channelName) == 0 then
+		if ChatChannels.GetId(channelName) == 0 then
 			JoinChannelByName(channelName)
 		end
 	end
 
-	after(1, function()
+	Timer.After(1, function()
 		self:RefreshJoinedChannels()
 		self:HideDiscoveryChannels()
 
@@ -297,7 +202,7 @@ function Comm:JoinDiscoveryChannels()
 end
 
 function Comm:IsDiscoveryChannel(channelName)
-	local normalizedChannelName = normalizeChannelName(channelName)
+	local normalizedChannelName = ChatChannels.NormalizeName(channelName)
 	return normalizedChannelName and self.channelLookup[normalizedChannelName] == true
 end
 
@@ -318,7 +223,7 @@ end
 
 function Comm:MakeMessageId()
 	self.messageCounter = (self.messageCounter or 0) + 1
-	return WEP:GetPlayerFullName() .. ":" .. now() .. ":" .. self.messageCounter
+	return Player.GetFullName() .. ":" .. Timer.Now() .. ":" .. self.messageCounter
 end
 
 function Comm:Send(messageType, payload, options)
@@ -358,7 +263,7 @@ function Comm:Send(messageType, payload, options)
 	end
 
 	local messageId = self:MakeMessageId()
-	local wireText, encodeErr = WEP.Protocol:Encode(messageType, payload, messageId, WEP:GetPlayerFullName(), now())
+	local wireText, encodeErr = WEP.Protocol:Encode(messageType, payload, messageId, Player.GetFullName(), Timer.Now())
 
 	if not wireText then
 		return false, encodeErr
@@ -388,7 +293,7 @@ function Comm:ScheduleQueue()
 
 	self.queueTimerActive = true
 
-	after(SEND_INTERVAL_SECONDS, function()
+	Timer.After(SEND_INTERVAL_SECONDS, function()
 		self.queueTimerActive = false
 		self:ProcessQueue()
 	end)
@@ -439,7 +344,7 @@ function Comm:SendDiscoveryWire(item)
 	local sentToAnyChannel = false
 
 	for _, channelName in ipairs(self.channelNames) do
-		local channelId = self.joinedChannels[channelName] or getChannelId(channelName)
+		local channelId = self.joinedChannels[channelName] or ChatChannels.GetId(channelName)
 
 		if channelId > 0 then
 			local ok, err = pcall(SendChatMessage, item.wireText, "CHANNEL", nil, channelId)
@@ -496,7 +401,7 @@ function Comm:SendAddonWire(item)
 end
 
 function Comm:PruneSeenMessages()
-	local cutoff = now() - SEEN_MESSAGE_TTL_SECONDS
+	local cutoff = Timer.Now() - SEEN_MESSAGE_TTL_SECONDS
 
 	for messageId, seenAt in pairs(self.seenMessages) do
 		if seenAt < cutoff then
@@ -513,7 +418,7 @@ function Comm:IsDuplicate(messageId)
 		return true
 	end
 
-	self.seenMessages[messageId] = now()
+	self.seenMessages[messageId] = Timer.Now()
 	return false
 end
 
@@ -543,7 +448,7 @@ function Comm:HandleIncoming(wireText, apiSender, transport, channelName)
 	end
 	message.transport = transport
 	message.channel = channelName
-	message.receivedAt = now()
+	message.receivedAt = Timer.Now()
 
 	self.stats.received = self.stats.received + 1
 	self:Dispatch(message)
@@ -568,7 +473,7 @@ end
 
 function Comm:OnEvent(event, ...)
 	if event == "PLAYER_ENTERING_WORLD" then
-		after(2, function()
+		Timer.After(2, function()
 			self:JoinDiscoveryChannels()
 		end)
 		return
@@ -597,7 +502,7 @@ end
 function Comm:GetStatus()
 	if #self.channelNames == 0 then
 		self.channelNames = self:GenerateDiscoveryChannels()
-		self.channelLookup = buildChannelLookup(self.channelNames)
+		self.channelLookup = ChatChannels.BuildLookup(self.channelNames)
 	end
 
 	self:RefreshJoinedChannels()

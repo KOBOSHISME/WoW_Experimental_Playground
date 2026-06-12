@@ -23,11 +23,20 @@ The addon will likely start with a small core and feature folders:
 WoW_Experimental_Playground/
   WoW_Experimental_Playground.toc
   Core.lua
+  Utils/
+  Tools/
   Comm/
   Features/
 ```
 
 This may change as the project finds its direction.
+
+## Architecture
+
+- `Utils/` contains pure helpers that do not call WoW APIs.
+- `Tools/` contains reusable WoW-facing services such as timers, player identity, and chat-channel helpers.
+- `Comm/` owns addon communication protocol and transport behavior.
+- `Features/` contains player-facing experiments and feature modules.
 
 ## Communication Diagnostics
 
@@ -61,4 +70,6 @@ World of Warcraft\_classic_era_\Interface\AddOns\WoW_Experimental_Playground
 - Keep experimental features isolated where possible.
 - Avoid relying on other addons unless a feature explicitly integrates with one.
 - Hidden addon channels are for coordination, not security. Treat received payloads as untrusted.
+- Run `luac51 -p Core.lua Utils\*.lua Tools\*.lua Comm\*.lua Features\*.lua` for Lua syntax checks.
+- Run `luacheck Core.lua Utils\*.lua Tools\*.lua Comm\*.lua Features\*.lua` with WoW globals allowed for linting.
 - Update this README as actual features, commands, and install details are added.

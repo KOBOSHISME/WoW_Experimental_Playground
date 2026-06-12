@@ -6,6 +6,12 @@
 ## SavedVariables: WEPDB
 
 Core.lua
+Utils\Table.lua
+Utils\Text.lua
+Utils\Hash.lua
+Tools\Timer.lua
+Tools\Player.lua
+Tools\ChatChannels.lua
 Comm\Protocol.lua
 Comm\Transport.lua
 Features\Diagnostics.lua
