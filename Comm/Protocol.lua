@@ -4,6 +4,8 @@ local Protocol = {}
 WEP.Protocol = Protocol
 
 Protocol.WIRE_PREFIX = "WEP1"
+Protocol.FIELD_SEPARATOR = "~"
+Protocol.LEGACY_FIELD_SEPARATOR = "|"
 Protocol.VERSION = 1
 Protocol.MAX_WIRE_BYTES = 240
 Protocol.MAX_MESSAGE_TYPE_BYTES = 32
@@ -15,6 +17,7 @@ local function escapeValue(value)
 
 	value = tostring(value)
 	value = value:gsub("%%", "%%25")
+	value = value:gsub("~", "%%7E")
 	value = value:gsub("|", "%%7C")
 	value = value:gsub(";", "%%3B")
 	value = value:gsub("=", "%%3D")
@@ -30,6 +33,7 @@ local function unescapeValue(value)
 	value = value:gsub("%%3D", "=")
 	value = value:gsub("%%3B", ";")
 	value = value:gsub("%%7C", "|")
+	value = value:gsub("%%7E", "~")
 	value = value:gsub("%%25", "%%")
 	return value
 end
@@ -141,12 +145,12 @@ local function decodePayload(payloadText)
 	return payload
 end
 
-local function splitWireMessage(text)
+local function splitWireMessage(text, separator)
 	local fields = {}
 	local startIndex = 1
 
 	for i = 1, 6 do
-		local separatorIndex = text:find("|", startIndex, true)
+		local separatorIndex = text:find(separator, startIndex, true)
 		if not separatorIndex then
 			return nil
 		end
@@ -187,7 +191,7 @@ function Protocol:Encode(messageType, payload, messageId, sender, timestamp)
 		payloadText,
 	}
 
-	local wireText = table.concat(fields, "|")
+	local wireText = table.concat(fields, self.FIELD_SEPARATOR)
 
 	if #wireText > self.MAX_WIRE_BYTES then
 		return nil, "message exceeds " .. self.MAX_WIRE_BYTES .. " bytes"
@@ -209,7 +213,12 @@ function Protocol:Decode(text)
 		return nil, "not a WEP message"
 	end
 
-	local fields = splitWireMessage(text)
+	local separator = text:sub(#self.WIRE_PREFIX + 1, #self.WIRE_PREFIX + 1)
+	if separator ~= self.FIELD_SEPARATOR and separator ~= self.LEGACY_FIELD_SEPARATOR then
+		return nil, "invalid field separator"
+	end
+
+	local fields = splitWireMessage(text, separator)
 	if not fields then
 		return nil, "malformed wire message"
 	end
