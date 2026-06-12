@@ -1,0 +1,47 @@
+# Windows and macOS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Lua tooling
+.luacheckcache
+lua_modules/
+
+# WoW addon packaging output
+*.zip
+*.rar
+*.7z
+dist/
+release/
+releases/
+pkg/
+.pkgmeta
+
+# Local game/client copies
+_retail_/
+_classic_/
+_classic_era_/
+Interface/
+WTF/
+Cache/
+Logs/
+Screenshots/
+
+# OS or build artifacts
+build/
+out/
+node_modules/
