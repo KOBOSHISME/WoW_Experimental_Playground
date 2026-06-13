@@ -50,6 +50,25 @@ The addon includes a small hidden communication diagnostic feature:
 
 `/wep comm ping` sends a hidden discovery-channel ping. Other players with the addon respond with a `PONG` after a short randomized delay.
 
+## Tool Debug Commands
+
+Reusable tools can be tested from chat with:
+
+```text
+/wep tools help
+/wep tools list
+/wep tools player
+/wep tools timer now
+/wep tools timer after 2
+/wep tools chat normalize General
+/wep tools chat getid General
+/wep tools overlay blackout 50
+/wep tools overlay status
+/wep tools overlay hide
+```
+
+`/wep debug tools ...` is also supported as an alias for `/wep tools ...`.
+
 ## Installation
 
 To install during development:

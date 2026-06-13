@@ -47,6 +47,34 @@ end
 function Diagnostics:HandleSlash(input)
 	local args = splitCommand(input)
 
+	if args[1] == "tools" or args[1] == "tool" then
+		if WEP.ToolDebug and WEP.ToolDebug.HandleSlash then
+			WEP.ToolDebug:HandleSlash(args)
+		else
+			WEP:Print("Tool debug feature is unavailable.")
+		end
+
+		return
+	end
+
+	if args[1] == "debug" and (args[2] == "tools" or args[2] == "tool") then
+		local toolArgs = {
+			"tools",
+		}
+
+		for index = 3, #args do
+			toolArgs[#toolArgs + 1] = args[index]
+		end
+
+		if WEP.ToolDebug and WEP.ToolDebug.HandleSlash then
+			WEP.ToolDebug:HandleSlash(toolArgs)
+		else
+			WEP:Print("Tool debug feature is unavailable.")
+		end
+
+		return
+	end
+
 	if args[1] == "comm" then
 		if args[2] == "status" then
 			self:PrintStatus()
@@ -72,6 +100,7 @@ function Diagnostics.PrintHelp()
 	WEP:Print("/wep comm status - Show communication status.")
 	WEP:Print("/wep comm ping - Send a hidden discovery ping.")
 	WEP:Print("/wep comm debug [on|off] - Toggle communication debug messages.")
+	WEP:Print("/wep tools help - Show tool debug commands.")
 end
 
 function Diagnostics.PrintStatus()
