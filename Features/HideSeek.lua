@@ -24,6 +24,7 @@ local List = WEP.Tools.List
 
 local REQUEST_INVITE = "hide_seek_invite"
 local MSG_STATE = "hide_seek_state"
+local MSG_ROSTER = "hide_seek_roster"
 local MSG_START = "hide_seek_start"
 local MSG_FOUND = "hide_seek_found"
 local MSG_END = "hide_seek_end"
@@ -96,6 +97,19 @@ local function isSelfName(name)
 	return namesMatch(name, Player.GetShortName()) or namesMatch(name, Player.GetFullName())
 end
 
+local function messageSentBy(message, playerName)
+	if isBlank(playerName) then
+		return false
+	end
+
+	local sender = message and message.sender
+	if isBlank(sender) then
+		sender = message and message.claimedSender
+	end
+
+	return namesMatch(sender, playerName)
+end
+
 local function getStatusLabel(status)
 	if status == STATUS_LOBBY then
 		return "Lobby"
@@ -131,24 +145,6 @@ local function formatDuration(seconds)
 	end
 
 	return seconds .. "s"
-end
-
-local function splitCsv(text)
-	local values = {}
-
-	for value in tostring(text or ""):gmatch("[^,]+") do
-		value = trim(value)
-
-		if value ~= "" then
-			values[#values + 1] = value
-		end
-	end
-
-	return values
-end
-
-local function joinCsv(values)
-	return table.concat(values, ",")
 end
 
 local function playSound(name)
@@ -210,6 +206,10 @@ function HideSeek:Initialize()
 
 	WEP.Comm:RegisterHandler(MSG_STATE, function(message)
 		self:OnStateMessage(message)
+	end)
+
+	WEP.Comm:RegisterHandler(MSG_ROSTER, function(message)
+		self:OnRosterMessage(message)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_START, function(message)
@@ -289,8 +289,16 @@ function HideSeek:IsHost()
 	return self.host and isSelfName(self.host)
 end
 
+function HideSeek:IsMessageFromHost(message, hostName)
+	return messageSentBy(message, hostName or self.host)
+end
+
 function HideSeek:IsSeeker()
 	return self.seeker and isSelfName(self.seeker)
+end
+
+function HideSeek:IsMessageFromSeeker(message)
+	return messageSentBy(message, self.seeker)
 end
 
 function HideSeek:IsParticipant()
@@ -303,6 +311,10 @@ function HideSeek:IsParticipant()
 	end
 
 	return false
+end
+
+function HideSeek:IsBusy()
+	return self.gameId ~= nil and self.status ~= STATUS_IDLE and self.status ~= STATUS_ENDED
 end
 
 function HideSeek:AddPlayer(name, found)
@@ -416,58 +428,6 @@ function HideSeek:AllHidersFound()
 	end
 
 	return hiderCount > 0
-end
-
-function HideSeek:SerializePlayers()
-	local values = {}
-
-	for _, key in ipairs(self.playerOrder) do
-		local player = self.players[key]
-
-		if player then
-			values[#values + 1] = player.name
-		end
-	end
-
-	return joinCsv(values)
-end
-
-function HideSeek:SerializeFound()
-	local values = {}
-
-	for _, key in ipairs(self.playerOrder) do
-		local player = self.players[key]
-
-		if player and player.found then
-			values[#values + 1] = player.name
-		end
-	end
-
-	return joinCsv(values)
-end
-
-function HideSeek:ApplyRoster(playersText, foundText)
-	local foundByKey = {}
-
-	for _, name in ipairs(splitCsv(foundText)) do
-		foundByKey[nameKey(name)] = true
-	end
-
-	self:ResetRoster()
-
-	for _, name in ipairs(splitCsv(playersText)) do
-		self:AddPlayer(name, foundByKey[nameKey(name)] == true)
-	end
-end
-
-function HideSeek:SelfInRosterText(playersText)
-	for _, name in ipairs(splitCsv(playersText)) do
-		if isSelfName(name) then
-			return true
-		end
-	end
-
-	return false
 end
 
 function HideSeek:GetRosterText()
@@ -952,6 +912,16 @@ function HideSeek:InviteFromWindow()
 	self:RefreshWindow()
 end
 
+function HideSeek:ReadWindowSettings()
+	local window = gameWindow
+	if not window then
+		return
+	end
+
+	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
+	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+end
+
 function HideSeek:ApplyWindowSettings()
 	local window = self:EnsureWindow()
 	if not window then
@@ -963,8 +933,7 @@ function HideSeek:ApplyWindowSettings()
 		return
 	end
 
-	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
-	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	self:ReadWindowSettings()
 	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
 	self:BroadcastState()
 	self:RefreshWindow()
@@ -1049,9 +1018,24 @@ end
 
 function HideSeek:OnInviteRequest(request)
 	local data = request.data or {}
-	local host = data.h or request.sender
+	local host = not isBlank(data.h) and namesMatch(data.h, request.sender) and data.h or request.sender
 	local hideSeconds = clamp(data.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	local seekSeconds = clamp(data.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+
+	if isBlank(data.g) then
+		return
+	end
+
+	if self:IsBusy() then
+		Requests.Respond(request.id, request.sender, "declined", {
+			g = data.g or "",
+			p = Player.GetFullName(),
+			reason = "busy",
+		})
+		WEP:Print("Declined Hide and Seek invite from", host .. ":", "already in a game.")
+		return
+	end
+
 	local message = host
 		.. " invited you to Hide and Seek.\nHide: "
 		.. formatDuration(hideSeconds)
@@ -1073,6 +1057,16 @@ function HideSeek:OnInviteRequest(request)
 		},
 		onSelect = function(result)
 			local status = result.value == "accepted" and "accepted" or "declined"
+
+			if status == "accepted" and self:IsBusy() then
+				Requests.Respond(request.id, request.sender, "declined", {
+					g = data.g or "",
+					p = Player.GetFullName(),
+					reason = "busy",
+				})
+				WEP:Print("Declined Hide and Seek invite from", host .. ":", "already in a game.")
+				return
+			end
 
 			local ok, responseErr = Requests.Respond(request.id, request.sender, status, {
 				g = data.g or "",
@@ -1109,12 +1103,20 @@ function HideSeek:OnInviteResponse(response)
 	local request = response.request
 	local requestData = request and request.data or {}
 
-	if requestData.g ~= self.gameId then
+	if not request or requestData.g ~= self.gameId then
+		return
+	end
+
+	if request.target and not namesMatch(response.sender, request.target) then
 		return
 	end
 
 	if response.status == "accepted" then
 		local playerName = response.data and response.data.p or response.sender
+		if not namesMatch(response.sender, playerName) then
+			playerName = response.sender
+		end
+
 		self:AddPlayer(playerName, false)
 		WEP:Print(playerName, "joined Hide and Seek.")
 		self:BroadcastState()
@@ -1148,15 +1150,44 @@ function HideSeek:BroadcastState()
 		g = self.gameId,
 		h = self.host or "",
 		st = self.status or STATUS_IDLE,
-		p = self:SerializePlayers(),
-		f = self:SerializeFound(),
 		sk = self.seeker or "",
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
 	})
 
+	if ok then
+		self:BroadcastRoster()
+	end
+
 	self:RefreshWindow()
 	return ok, messageIdOrErr
+end
+
+function HideSeek:BroadcastRoster()
+	if not self.gameId then
+		return false
+	end
+
+	local sentAny = false
+	local first = true
+
+	for _, key in ipairs(self.playerOrder) do
+		local player = self.players[key]
+
+		if player then
+			local ok = self:Broadcast(MSG_ROSTER, {
+				g = self.gameId,
+				p = player.name,
+				f = player.found and 1 or 0,
+				c = first and 1 or 0,
+			})
+
+			sentAny = sentAny or ok
+			first = false
+		end
+	end
+
+	return sentAny
 end
 
 function HideSeek:OnStateMessage(message)
@@ -1167,17 +1198,40 @@ function HideSeek:OnStateMessage(message)
 	end
 
 	local isKnownGame = self.gameId and payload.g == self.gameId
-	if not isKnownGame and not self:SelfInRosterText(payload.p) then
+	if not isKnownGame then
+		return
+	end
+
+	local expectedHost = not isBlank(self.host) and self.host or payload.h
+	if not self:IsMessageFromHost(message, expectedHost) then
 		return
 	end
 
 	self.gameId = payload.g
-	self.host = payload.h or message.sender
+	self.host = not isBlank(self.host) and self.host or (not isBlank(payload.h) and payload.h or message.sender)
 	self.status = payload.st or STATUS_LOBBY
 	self.seeker = not isBlank(payload.sk) and payload.sk or nil
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
-	self:ApplyRoster(payload.p, payload.f)
+	self:ResetRoster()
+	self:RefreshWindow()
+end
+
+function HideSeek:OnRosterMessage(message)
+	local payload = message.payload or {}
+
+	if payload.g ~= self.gameId or not self:IsMessageFromHost(message) then
+		return
+	end
+
+	if tostring(payload.c or "") == "1" then
+		self:ResetRoster()
+	end
+
+	if not isBlank(payload.p) then
+		self:AddPlayer(payload.p, tostring(payload.f or "") == "1")
+	end
+
 	self:RefreshWindow()
 end
 
@@ -1211,6 +1265,8 @@ function HideSeek:StartGame()
 		return
 	end
 
+	self:ReadWindowSettings()
+
 	if self:GetPlayerCount() < 2 then
 		WEP:Print("Hide and Seek needs at least 2 players.")
 		self:ShowMenu()
@@ -1239,7 +1295,7 @@ end
 function HideSeek:OnStartMessage(message)
 	local payload = message.payload or {}
 
-	if payload.g ~= self.gameId then
+	if payload.g ~= self.gameId or not self:IsMessageFromHost(message) then
 		return
 	end
 
@@ -1304,7 +1360,7 @@ function HideSeek:BeginSeeking()
 	end
 
 	Timer.After(self.seekSeconds, function()
-		if self.timerToken == token and self.status == STATUS_SEEKING and self:IsSeeker() then
+		if self.timerToken == token and self.status == STATUS_SEEKING and self:IsHost() then
 			self:FinishGame("time", true)
 		end
 	end)
@@ -1433,7 +1489,7 @@ function HideSeek:MarkFound(playerName, foundBy, broadcast)
 		})
 	end
 
-	if self:IsSeeker() and self:AllHidersFound() then
+	if self:IsHost() and self:AllHidersFound() then
 		self:FinishGame("found", true)
 	end
 
@@ -1444,11 +1500,11 @@ end
 function HideSeek:OnFoundMessage(message)
 	local payload = message.payload or {}
 
-	if payload.g ~= self.gameId then
+	if payload.g ~= self.gameId or self.status ~= STATUS_SEEKING or not self:IsMessageFromSeeker(message) then
 		return
 	end
 
-	self:MarkFound(payload.p, payload.by or message.sender, false)
+	self:MarkFound(payload.p, message.sender, false)
 
 	if payload.p and isSelfName(payload.p) then
 		WEP:Print("You were found.")
@@ -1490,7 +1546,7 @@ end
 function HideSeek:OnEndMessage(message)
 	local payload = message.payload or {}
 
-	if payload.g ~= self.gameId then
+	if payload.g ~= self.gameId or not self:IsMessageFromHost(message) then
 		return
 	end
 
@@ -1504,10 +1560,9 @@ function HideSeek:LeaveGame()
 	end
 
 	local wasHost = self:IsHost()
-	local wasActive = self.status == STATUS_HIDING or self.status == STATUS_SEEKING
 	local gameId = self.gameId
 
-	if wasHost or wasActive then
+	if wasHost then
 		self:Broadcast(MSG_END, {
 			g = gameId,
 			r = "canceled",
@@ -1530,15 +1585,34 @@ function HideSeek:OnLeaveMessage(message)
 		return
 	end
 
+	local playerName = payload.p or message.sender
+	if not messageSentBy(message, playerName) or not self:GetPlayer(playerName) then
+		return
+	end
+
+	local playerWasSeeker = self.seeker and namesMatch(playerName, self.seeker)
+
 	if self.status == STATUS_LOBBY or self.status == STATUS_ENDED then
-		if self:RemovePlayer(payload.p or message.sender) then
-			WEP:Print(payload.p or message.sender, "left Hide and Seek.")
+		if self:RemovePlayer(playerName) then
+			WEP:Print(playerName, "left Hide and Seek.")
 			self:BroadcastState()
 		end
 		return
 	end
 
-	self:FinishGame("canceled", true)
+	if self:RemovePlayer(playerName) then
+		WEP:Print(playerName, "left Hide and Seek.")
+	end
+
+	if playerWasSeeker then
+		self:FinishGame("canceled", true)
+	elseif self:GetHiderCount() == 0 then
+		self:FinishGame("canceled", true)
+	elseif self:AllHidersFound() then
+		self:FinishGame("found", true)
+	else
+		self:BroadcastState()
+	end
 end
 
 function HideSeek:ResetGame()

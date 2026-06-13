@@ -78,10 +78,17 @@ function List.Create(parent, config)
 	frame.empty:SetJustifyH("CENTER")
 	frame.empty:SetText(list.emptyText)
 
+	frame.more = frame:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	frame.more:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -4, 2)
+	frame.more:SetJustifyH("RIGHT")
+	frame.more:Hide()
+
 	function list:SetItems(items)
 		items = items or {}
+		local visibleCount = math.min(#items, self.visibleRows)
 
-		for index, item in ipairs(items) do
+		for index = 1, visibleCount do
+			local item = items[index]
 			local row = ensureRow(self, index)
 			row:ClearAllPoints()
 			row:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, -((index - 1) * self.rowHeight))
@@ -114,7 +121,7 @@ function List.Create(parent, config)
 			row:Show()
 		end
 
-		for index = #items + 1, #self.rows do
+		for index = visibleCount + 1, #self.rows do
 			self.rows[index]:Hide()
 		end
 
@@ -123,6 +130,13 @@ function List.Create(parent, config)
 			self.frame.empty:Show()
 		else
 			self.frame.empty:Hide()
+		end
+
+		if #items > visibleCount then
+			self.frame.more:SetText("+" .. (#items - visibleCount) .. " more")
+			self.frame.more:Show()
+		else
+			self.frame.more:Hide()
 		end
 	end
 
