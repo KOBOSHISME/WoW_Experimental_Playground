@@ -65,6 +65,10 @@ Reusable tools can be tested from chat with:
 /wep tools overlay blackout 50
 /wep tools overlay status
 /wep tools overlay hide
+/wep tools environment status
+/wep tools environment location
+/wep tools environment unit target
+/wep tools environment units 10
 /wep tools request send Playername debug note=hello
 /wep tools request respond 12345.1 Playername accepted
 /wep tools request status
@@ -87,6 +91,17 @@ WEP.Tools.Requests.RegisterResponseHandler("challenge", function(response)
 end)
 
 WEP.Tools.Requests.Send("Playername", "challenge", { name = "duel" })
+```
+
+## Environment Tool
+
+`WEP.Tools.Environment` provides snapshots of the current zone, map, instance state, PvP state, player flags, and units exposed by the WoW API. Unit discovery is limited to addressable tokens such as target, mouseover, focus, boss units, group units, pets, and visible nameplates.
+
+```lua
+local location = WEP.Tools.Environment.GetLocation()
+local target = WEP.Tools.Environment.GetUnit("target")
+local units = WEP.Tools.Environment.GetUnits()
+local snapshot = WEP.Tools.Environment.GetSnapshot()
 ```
 
 ## Installation

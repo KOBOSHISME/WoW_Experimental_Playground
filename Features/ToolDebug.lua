@@ -8,6 +8,7 @@ local Player = WEP.Tools.Player
 local ChatChannels = WEP.Tools.ChatChannels
 local ScreenOverlay = WEP.Tools.ScreenOverlay
 local Requests = WEP.Tools.Requests
+local Environment = WEP.Tools.Environment
 
 local function joinArgs(args, startIndex)
 	local values = {}
@@ -67,6 +68,32 @@ local function formatData(data)
 	end
 
 	return table.concat(parts, ", ")
+end
+
+local function formatOptional(value)
+	if value == nil or value == "" then
+		return "none"
+	end
+
+	return tostring(value)
+end
+
+local function formatUnitSummary(unit)
+	local healthPercent = unit.health and unit.health.percent and (unit.health.percent .. "%") or "unknown"
+	local level = unit.level and tostring(unit.level) or "unknown"
+	local reaction = unit.reactionLabel or "unknown"
+	local npcId = unit.npcId and (" npc:" .. unit.npcId) or ""
+
+	return unit.unit
+		.. " "
+		.. (unit.name or "Unknown")
+		.. " level:"
+		.. level
+		.. " "
+		.. reaction
+		.. " hp:"
+		.. healthPercent
+		.. npcId
 end
 
 function ToolDebug:Initialize()
@@ -138,6 +165,11 @@ function ToolDebug:HandleSlash(args)
 		return
 	end
 
+	if toolName == "environment" or toolName == "env" then
+		self:HandleEnvironment(args)
+		return
+	end
+
 	if toolName == "request" or toolName == "requests" then
 		self:HandleRequests(args)
 		return
@@ -158,13 +190,17 @@ function ToolDebug.PrintHelp()
 	WEP:Print("/wep tools overlay blackout <0-100> - Set blackout percentage.")
 	WEP:Print("/wep tools overlay hide - Hide the blackout overlay.")
 	WEP:Print("/wep tools overlay status - Print the current blackout percentage.")
+	WEP:Print("/wep tools environment status - Print environment summary.")
+	WEP:Print("/wep tools environment location - Print location details.")
+	WEP:Print("/wep tools environment unit [unit] - Print one unit, default target.")
+	WEP:Print("/wep tools environment units [limit] - Print visible/addressable units.")
 	WEP:Print("/wep tools request send <target|*> <type> [key=value ...] - Send a request.")
 	WEP:Print("/wep tools request respond <id> <target> <status> [key=value ...] - Send a response.")
 	WEP:Print("/wep tools request status - Print request tool state.")
 end
 
 function ToolDebug.PrintList()
-	WEP:Print("Testable tools: player, timer, chat, overlay, request.")
+	WEP:Print("Testable tools: player, timer, chat, overlay, environment, request.")
 end
 
 function ToolDebug.PrintPlayer()
@@ -244,6 +280,142 @@ function ToolDebug:HandleScreenOverlay(args)
 	end
 
 	WEP:Print("Usage: /wep tools overlay blackout <0-100>|hide|status")
+end
+
+function ToolDebug:HandleEnvironment(args)
+	if not Environment then
+		WEP:Print("Environment tool unavailable.")
+		return
+	end
+
+	local action = args[3] or "status"
+
+	if action == "status" then
+		local status = Environment.GetStatus()
+		local location = status.location
+
+		WEP:Print(
+			"Environment:",
+			formatOptional(location.zone),
+			"subzone:",
+			formatOptional(location.subZone),
+			"map:",
+			formatOptional(location.mapId),
+			"coords:",
+			formatOptional(location.x),
+			formatOptional(location.y)
+		)
+		WEP:Print(
+			"Units:",
+			status.unitCount,
+			"target:",
+			status.hasTarget and "yes" or "no",
+			"mouseover:",
+			status.hasMouseover and "yes" or "no",
+			"focus:",
+			status.hasFocus and "yes" or "no"
+		)
+		return
+	end
+
+	if action == "location" then
+		self:PrintEnvironmentLocation()
+		return
+	end
+
+	if action == "unit" then
+		self:PrintEnvironmentUnit(args[4] or "target")
+		return
+	end
+
+	if action == "units" then
+		self:PrintEnvironmentUnits(math.floor(clamp(args[4], 1, 20)))
+		return
+	end
+
+	WEP:Print("Usage: /wep tools environment status|location|unit [unit]|units [limit]")
+end
+
+function ToolDebug.PrintEnvironmentLocation()
+	local location = Environment.GetLocation()
+	local instance = location.instance
+	local flags = location.flags
+
+	WEP:Print(
+		"Location:",
+		formatOptional(location.zone),
+		"subzone:",
+		formatOptional(location.subZone),
+		"real:",
+		formatOptional(location.realZone)
+	)
+	WEP:Print(
+		"Map:",
+		formatOptional(location.mapId),
+		"coords:",
+		formatOptional(location.x),
+		formatOptional(location.y),
+		"pvp:",
+		formatOptional(location.pvp.type)
+	)
+	WEP:Print(
+		"Instance:",
+		instance.inInstance and "yes" or "no",
+		formatOptional(instance.name),
+		formatOptional(instance.type),
+		"difficulty:",
+		formatOptional(instance.difficultyName)
+	)
+	WEP:Print(
+		"Flags:",
+		"resting=" .. tostring(flags.resting),
+		"indoors=" .. tostring(flags.indoors),
+		"outdoors=" .. tostring(flags.outdoors),
+		"swimming=" .. tostring(flags.swimming),
+		"mounted=" .. tostring(flags.mounted)
+	)
+end
+
+function ToolDebug.PrintEnvironmentUnit(unitToken)
+	local unit = Environment.GetUnit(unitToken)
+
+	if not unit then
+		WEP:Print("No unit found for token:", unitToken)
+		return
+	end
+
+	WEP:Print(formatUnitSummary(unit))
+	WEP:Print(
+		"Unit details:",
+		"guidType:",
+		formatOptional(unit.guidType),
+		"creature:",
+		formatOptional(unit.creatureType),
+		"classification:",
+		formatOptional(unit.classification)
+	)
+	WEP:Print(
+		"Unit flags:",
+		"player=" .. tostring(unit.isPlayer),
+		"enemy=" .. tostring(unit.isEnemy),
+		"friend=" .. tostring(unit.isFriend),
+		"combat=" .. tostring(unit.inCombat),
+		"target=" .. formatOptional(unit.targetName)
+	)
+end
+
+function ToolDebug.PrintEnvironmentUnits(limit)
+	local units = Environment.GetUnits()
+
+	WEP:Print("Environment units:", #units, "showing:", math.min(#units, limit))
+
+	for index = 1, math.min(#units, limit) do
+		WEP:Print(formatUnitSummary(units[index]))
+	end
+
+	if #units > limit then
+		WEP:Print("Additional units omitted:", #units - limit)
+	end
 end
 
 function ToolDebug:HandleRequests(args)
