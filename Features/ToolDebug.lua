@@ -7,6 +7,7 @@ local Timer = WEP.Tools.Timer
 local Player = WEP.Tools.Player
 local ChatChannels = WEP.Tools.ChatChannels
 local ScreenOverlay = WEP.Tools.ScreenOverlay
+local UIVisibility = WEP.Tools.UIVisibility
 local Requests = WEP.Tools.Requests
 local Environment = WEP.Tools.Environment
 
@@ -165,6 +166,11 @@ function ToolDebug:HandleSlash(args)
 		return
 	end
 
+	if toolName == "ui" or toolName == "visibility" then
+		self:HandleUIVisibility(args)
+		return
+	end
+
 	if toolName == "environment" or toolName == "env" then
 		self:HandleEnvironment(args)
 		return
@@ -190,6 +196,10 @@ function ToolDebug.PrintHelp()
 	WEP:Print("/wep tools overlay blackout <0-100> - Set blackout percentage.")
 	WEP:Print("/wep tools overlay hide - Hide the blackout overlay.")
 	WEP:Print("/wep tools overlay status - Print the current blackout percentage.")
+	WEP:Print("/wep tools ui hide|show|toggle all - Control full UI visibility.")
+	WEP:Print("/wep tools ui hide|show|toggle <group> - Control a UI group.")
+	WEP:Print("/wep tools ui show managed - Restore all managed UI groups.")
+	WEP:Print("/wep tools ui groups|status - Inspect UI visibility state.")
 	WEP:Print("/wep tools environment status - Print environment summary.")
 	WEP:Print("/wep tools environment location - Print location details.")
 	WEP:Print("/wep tools environment unit [unit] - Print one unit, default target.")
@@ -200,7 +210,7 @@ function ToolDebug.PrintHelp()
 end
 
 function ToolDebug.PrintList()
-	WEP:Print("Testable tools: player, timer, chat, overlay, environment, request.")
+	WEP:Print("Testable tools: player, timer, chat, overlay, ui, environment, request.")
 end
 
 function ToolDebug.PrintPlayer()
@@ -280,6 +290,119 @@ function ToolDebug:HandleScreenOverlay(args)
 	end
 
 	WEP:Print("Usage: /wep tools overlay blackout <0-100>|hide|status")
+end
+
+function ToolDebug:HandleUIVisibility(args)
+	if not UIVisibility then
+		WEP:Print("UI visibility tool unavailable.")
+		return
+	end
+
+	local action = args[3] or "status"
+	local target = args[4]
+
+	if action == "hide" then
+		if target == "all" then
+			local ok, state = UIVisibility.HideAll()
+			self:PrintUIVisibilityResult(ok, state, "all")
+			return
+		end
+
+		if target then
+			local ok, state, groupName = UIVisibility.Hide(target)
+			self:PrintUIVisibilityResult(ok, state, groupName or target)
+			return
+		end
+	end
+
+	if action == "show" then
+		if target == "all" then
+			local ok, state = UIVisibility.ShowAll()
+			self:PrintUIVisibilityResult(ok, state, "all")
+			return
+		end
+
+		if target == "managed" then
+			local ok, state = UIVisibility.ShowEverythingManaged()
+			self:PrintUIVisibilityResult(ok, state, "managed")
+			return
+		end
+
+		if target then
+			local ok, state, groupName = UIVisibility.Show(target)
+			self:PrintUIVisibilityResult(ok, state, groupName or target)
+			return
+		end
+	end
+
+	if action == "toggle" then
+		if target == "all" then
+			local ok, state = UIVisibility.ToggleAll()
+			self:PrintUIVisibilityResult(ok, state, "all")
+			return
+		end
+
+		if target then
+			local ok, state, groupName = UIVisibility.Toggle(target)
+			self:PrintUIVisibilityResult(ok, state, groupName or target)
+			return
+		end
+	end
+
+	if action == "groups" then
+		self:PrintUIVisibilityGroups()
+		return
+	end
+
+	if action == "status" then
+		self:PrintUIVisibilityStatus()
+		return
+	end
+
+	WEP:Print("Usage: /wep tools ui hide|show|toggle all|<group>")
+	WEP:Print("Usage: /wep tools ui show managed")
+	WEP:Print("Usage: /wep tools ui groups|status")
+end
+
+function ToolDebug:PrintUIVisibilityResult(ok, state, target)
+	if not ok then
+		WEP:Print("UI visibility failed:", state)
+		return
+	end
+
+	if state == "queued" then
+		WEP:Print("UI visibility queued until combat ends:", formatOptional(target))
+		return
+	end
+
+	WEP:Print("UI visibility applied:", formatOptional(target))
+end
+
+function ToolDebug.PrintUIVisibilityGroups()
+	WEP:Print("UI visibility groups:", table.concat(UIVisibility.GetGroupNames(), ", "))
+end
+
+function ToolDebug.PrintUIVisibilityStatus()
+	local status = UIVisibility.GetStatus()
+
+	WEP:Print(
+		"Full UI:",
+		status.allHidden and "hidden" or "shown",
+		"tracked:",
+		status.trackedAllHidden and "hidden" or "shown",
+		"pending:",
+		status.pendingCount
+	)
+
+	for _, group in ipairs(status.groups) do
+		WEP:Print(
+			"UI group:",
+			group.name,
+			group.hidden and "hidden" or "shown",
+			"frames:",
+			group.frameCount
+		)
+	end
 end
 
 function ToolDebug:HandleEnvironment(args)

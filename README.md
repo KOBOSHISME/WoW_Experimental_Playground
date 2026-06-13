@@ -65,6 +65,13 @@ Reusable tools can be tested from chat with:
 /wep tools overlay blackout 50
 /wep tools overlay status
 /wep tools overlay hide
+/wep tools ui groups
+/wep tools ui hide all
+/wep tools ui show all
+/wep tools ui toggle actionbars
+/wep tools ui hide minimap
+/wep tools ui show managed
+/wep tools ui status
 /wep tools environment status
 /wep tools environment location
 /wep tools environment unit target
@@ -93,6 +100,26 @@ end)
 WEP.Tools.Requests.Send("Playername", "challenge", { name = "duel" })
 ```
 
+## UI Visibility Tool
+
+`WEP.Tools.UIVisibility` controls screenshot-style full UI visibility and managed Blizzard UI groups at runtime. It does not persist hidden state across reloads.
+
+```lua
+WEP.Tools.UIVisibility.HideAll()
+WEP.Tools.UIVisibility.ShowAll()
+WEP.Tools.UIVisibility.ToggleAll()
+WEP.Tools.UIVisibility.Hide("actionbars")
+WEP.Tools.UIVisibility.Show("actionbars")
+WEP.Tools.UIVisibility.Toggle("minimap")
+WEP.Tools.UIVisibility.ShowEverythingManaged()
+local status = WEP.Tools.UIVisibility.GetStatus()
+```
+
+Managed groups are:
+
+```text
+actionbars, unitframes, minimap, questtracker, chat, bags, micromenu, buffs, casting, mirrorbars
+```
 ## Environment Tool
 
 `WEP.Tools.Environment` provides snapshots of the current zone, map, instance state, PvP state, player flags, and units exposed by the WoW API. Unit discovery is limited to addressable tokens such as target, mouseover, focus, boss units, group units, pets, and visible nameplates.
