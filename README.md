@@ -58,9 +58,9 @@ The addon includes an addon-managed Hide and Seek challenge. Open it with:
 /wep hide
 ```
 
-The menu lets the host invite players one at a time, set the hiding countdown and seeking time, start the game, print status, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
+The window lets the host invite players one at a time, set the hiding countdown and seeking time, start the game, view the roster, watch player states, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
 
-During a game, the starter randomly chooses the seeker. The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The seeker marks hiders found by targeting them before the seek timer expires.
+During a game, the starter randomly chooses the seeker. The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The Hide and Seek window updates timers and roster states while the seeker marks hiders found by targeting them before the seek timer expires.
 
 ## Tool Debug Commands
 
@@ -145,6 +145,24 @@ WEP.Tools.Dialog.Show({
 ```
 
 The result table includes `id`, `title`, `message`, `canceled`, `reason`, and, when an option was selected, `index`, `text`, and `value`.
+
+## UI Tools
+
+`WEP.Tools.Window`, `WEP.Tools.Form`, and `WEP.Tools.List` provide lightweight reusable UI building blocks for feature panels.
+
+```lua
+local window = WEP.Tools.Window.Create({ title = "Feature", width = 420, height = 320 })
+local input = WEP.Tools.Form.CreateInput(window.content, { label = "Name" })
+local button = WEP.Tools.Form.CreateButton(window.footer, { text = "Apply" })
+local list = WEP.Tools.List.Create(window.content, {
+	columns = {
+		{ key = "name", width = 160 },
+		{ key = "state", width = 120 },
+	},
+})
+```
+
+The window helper owns frame chrome and movable panel behavior. The form helper creates labeled text/number inputs and buttons. The list helper renders fixed-height row lists with simple columns and empty-state text.
 
 ## Sound Tool
 

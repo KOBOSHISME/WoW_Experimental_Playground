@@ -16,6 +16,9 @@ Tools\Sound.lua
 Tools\ScreenOverlay.lua
 Tools\UIVisibility.lua
 Tools\Dialog.lua
+Tools\Window.lua
+Tools\Form.lua
+Tools\List.lua
 Tools\Environment.lua
 Tools\Requests.lua
 Comm\Protocol.lua

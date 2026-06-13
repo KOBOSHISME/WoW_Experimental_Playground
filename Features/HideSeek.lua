@@ -18,6 +18,9 @@ local Dialog = WEP.Tools.Dialog
 local ScreenOverlay = WEP.Tools.ScreenOverlay
 local UIVisibility = WEP.Tools.UIVisibility
 local Sound = WEP.Tools.Sound
+local WindowTool = WEP.Tools.Window
+local Form = WEP.Tools.Form
+local List = WEP.Tools.List
 
 local REQUEST_INVITE = "hide_seek_invite"
 local MSG_STATE = "hide_seek_state"
@@ -44,8 +47,8 @@ local SEEKER_UI_GROUPS = {
 	"actionbars",
 }
 
-local promptFrame
 local countdownFrame
+local gameWindow
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
@@ -91,14 +94,6 @@ end
 
 local function isSelfName(name)
 	return namesMatch(name, Player.GetShortName()) or namesMatch(name, Player.GetFullName())
-end
-
-local function setSolidColor(texture, red, green, blue, alpha)
-	if texture.SetColorTexture then
-		texture:SetColorTexture(red, green, blue, alpha)
-	else
-		texture:SetTexture(red, green, blue, alpha)
-	end
 end
 
 local function getStatusLabel(status)
@@ -160,121 +155,6 @@ local function playSound(name)
 	if Sound and Sound.Play then
 		Sound.Play(name, { duration = 1 })
 	end
-end
-
-local function safeHideDialog()
-	if Dialog and Dialog.GetStatus and Dialog.GetStatus().active then
-		Dialog.Hide("hide_seek")
-	end
-end
-
-local function ensurePromptFrame()
-	if promptFrame then
-		return promptFrame
-	end
-
-	if not CreateFrame or not UIParent then
-		return nil
-	end
-
-	local template = BackdropTemplateMixin and "BackdropTemplate" or nil
-	local frame = CreateFrame("Frame", "WEPHideSeekPromptFrame", UIParent, template)
-	frame:SetPoint("CENTER")
-	frame:SetFrameStrata("DIALOG")
-	frame:SetFrameLevel(120)
-	frame:SetWidth(360)
-	frame:EnableMouse(true)
-	frame:SetMovable(true)
-	frame:SetToplevel(true)
-	frame:Hide()
-
-	if frame.RegisterForDrag then
-		frame:RegisterForDrag("LeftButton")
-		frame:SetScript("OnDragStart", frame.StartMoving)
-		frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-	end
-
-	if frame.SetBackdrop then
-		frame:SetBackdrop({
-			bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-			tile = true,
-			tileSize = 32,
-			edgeSize = 32,
-			insets = {
-				left = 11,
-				right = 12,
-				top = 12,
-				bottom = 11,
-			},
-		})
-	else
-		frame.background = frame:CreateTexture(nil, "BACKGROUND")
-		frame.background:SetAllPoints(frame)
-		setSolidColor(frame.background, 0.02, 0.02, 0.02, 0.92)
-	end
-
-	frame.title = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-	frame.title:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -16)
-	frame.title:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -42, -16)
-	frame.title:SetJustifyH("LEFT")
-
-	frame.closeButton = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-	frame.closeButton:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
-	frame.closeButton:SetScript("OnClick", function()
-		HideSeek:HidePrompt()
-	end)
-
-	frame.message = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	frame.message:SetPoint("TOPLEFT", frame.title, "BOTTOMLEFT", 0, -14)
-	frame.message:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -52)
-	frame.message:SetJustifyH("LEFT")
-	frame.message:SetJustifyV("TOP")
-
-	if frame.message.SetWordWrap then
-		frame.message:SetWordWrap(true)
-	end
-
-	frame.labels = {}
-	frame.edits = {}
-
-	for index = 1, 2 do
-		local label = frame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-		label:SetJustifyH("LEFT")
-		frame.labels[index] = label
-
-		local edit = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
-		edit:SetHeight(24)
-		edit:SetAutoFocus(false)
-		edit:SetScript("OnEnterPressed", function()
-			HideSeek:SubmitPrompt()
-		end)
-		edit:SetScript("OnEscapePressed", function()
-			HideSeek:HidePrompt()
-		end)
-		frame.edits[index] = edit
-	end
-
-	frame.okButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	frame.okButton:SetSize(96, 24)
-	frame.okButton:SetText("Okay")
-	frame.okButton:SetScript("OnClick", function()
-		HideSeek:SubmitPrompt()
-	end)
-
-	frame.cancelButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-	frame.cancelButton:SetSize(96, 24)
-	frame.cancelButton:SetText("Cancel")
-	frame.cancelButton:SetScript("OnClick", function()
-		HideSeek:HidePrompt()
-	end)
-
-	if UISpecialFrames then
-		UISpecialFrames[#UISpecialFrames + 1] = "WEPHideSeekPromptFrame"
-	end
-
-	promptFrame = frame
-	return promptFrame
 end
 
 local function ensureCountdownFrame()
@@ -373,8 +253,11 @@ function HideSeek:CreateLobby()
 	self.status = STATUS_LOBBY
 	self.seeker = nil
 	self.seekEndsAt = nil
+	self.hideEndsAt = nil
+	self.resultReason = nil
 	self:ResetRoster()
 	self:AddPlayer(Player.GetFullName(), false)
+	self:RefreshWindow()
 	return self.gameId
 end
 
@@ -634,50 +517,461 @@ function HideSeek:GetSummary()
 	return table.concat(lines, "\n")
 end
 
-function HideSeek:ShowMenu()
-	local options = {}
-
-	options[#options + 1] = {
-		text = "Invite Player",
-		value = "invite",
-	}
-	options[#options + 1] = {
-		text = "Game Settings",
-		value = "settings",
-	}
-	options[#options + 1] = {
-		text = "Start Game",
-		value = "start",
-	}
-	options[#options + 1] = {
-		text = "Print Status",
-		value = "status",
-	}
-
-	if self.gameId then
-		options[#options + 1] = {
-			text = "Leave Game",
-			value = "leave",
-		}
+function HideSeek:GetRemainingHideSeconds()
+	if self.status ~= STATUS_HIDING or not self.hideEndsAt then
+		return nil
 	end
 
-	options[#options + 1] = {
-		text = "Close",
-		value = "close",
-	}
+	local remaining = self.hideEndsAt - Timer.Now()
+	if remaining < 0 then
+		return 0
+	end
 
-	Dialog.Show({
-		title = "Hide and Seek",
-		message = self:GetSummary(),
-		options = options,
-		onSelect = function(result)
-			if result.canceled or result.value == "close" then
-				return
+	return remaining
+end
+
+function HideSeek:GetRemainingSeekSeconds()
+	if self.status ~= STATUS_SEEKING or not self.seekEndsAt then
+		return nil
+	end
+
+	local remaining = self.seekEndsAt - Timer.Now()
+	if remaining < 0 then
+		return 0
+	end
+
+	return remaining
+end
+
+function HideSeek:CanHostControl()
+	if self.status ~= STATUS_IDLE and self.status ~= STATUS_LOBBY and self.status ~= STATUS_ENDED then
+		return false
+	end
+
+	return not self.gameId or self:IsHost()
+end
+
+function HideSeek:GetPlayerRoleText(player)
+	local parts = {}
+
+	if self.seeker and namesMatch(player.name, self.seeker) then
+		parts[#parts + 1] = "Seeker"
+	elseif self.status == STATUS_LOBBY or self.status == STATUS_IDLE then
+		parts[#parts + 1] = "Player"
+	else
+		parts[#parts + 1] = "Hider"
+	end
+
+	if self.host and namesMatch(player.name, self.host) then
+		parts[#parts + 1] = "Host"
+	end
+
+	if isSelfName(player.name) then
+		parts[#parts + 1] = "You"
+	end
+
+	return table.concat(parts, ", ")
+end
+
+function HideSeek:GetPlayerStateText(player)
+	if self.status == STATUS_IDLE then
+		return "Idle"
+	end
+
+	if self.status == STATUS_LOBBY then
+		return "Waiting"
+	end
+
+	if self.seeker and namesMatch(player.name, self.seeker) then
+		if self.status == STATUS_HIDING then
+			return "Counting"
+		end
+
+		if self.status == STATUS_SEEKING then
+			return "Seeking"
+		end
+
+		return "Seeker"
+	end
+
+	if player.found then
+		return "Found"
+	end
+
+	if self.status == STATUS_HIDING then
+		return "Hiding"
+	end
+
+	if self.status == STATUS_SEEKING then
+		return "Hidden"
+	end
+
+	if self.status == STATUS_ENDED then
+		return "Done"
+	end
+
+	return "Waiting"
+end
+
+function HideSeek:GetRosterItems()
+	local items = {}
+
+	for _, key in ipairs(self.playerOrder) do
+		local player = self.players[key]
+
+		if player then
+			local color
+
+			if self.seeker and namesMatch(player.name, self.seeker) then
+				color = {
+					r = 0.22,
+					g = 0.10,
+					b = 0.02,
+					a = 0.28,
+				}
+			elseif player.found then
+				color = {
+					r = 0.12,
+					g = 0.12,
+					b = 0.12,
+					a = 0.35,
+				}
+			elseif isSelfName(player.name) then
+				color = {
+					r = 0.02,
+					g = 0.12,
+					b = 0.20,
+					a = 0.30,
+				}
 			end
 
-			self:HandleMenuAction(result.value)
+			items[#items + 1] = {
+				columns = {
+					name = player.name,
+					role = self:GetPlayerRoleText(player),
+					state = self:GetPlayerStateText(player),
+				},
+				color = color,
+			}
+		end
+	end
+
+	return items
+end
+
+function HideSeek:GetGameDetailText()
+	local details = {
+		"Host " .. (self.host or "none"),
+		"Players " .. self:GetPlayerCount(),
+		"Hide " .. formatDuration(self.hideSeconds),
+		"Seek " .. formatDuration(self.seekSeconds),
+	}
+
+	if self.seeker then
+		details[#details + 1] = "Seeker " .. self.seeker
+	end
+
+	if self.status == STATUS_SEEKING then
+		details[#details + 1] = "Found " .. self:GetFoundCount() .. "/" .. self:GetHiderCount()
+	end
+
+	return table.concat(details, "  |  ")
+end
+
+function HideSeek:GetTimerText()
+	local hideRemaining = self:GetRemainingHideSeconds()
+	if hideRemaining then
+		return "Seeker released in " .. formatDuration(hideRemaining)
+	end
+
+	local seekRemaining = self:GetRemainingSeekSeconds()
+	if seekRemaining then
+		return "Time left " .. formatDuration(seekRemaining)
+	end
+
+	if self.status == STATUS_ENDED and self.resultReason then
+		if self.resultReason == "found" then
+			return "Result: seeker wins"
+		end
+
+		if self.resultReason == "time" then
+			return "Result: hiders win"
+		end
+
+		return "Result: ended"
+	end
+
+	return "No active timer"
+end
+
+local function setInputEnabled(input, enabled)
+	if input and input.SetEnabled then
+		input:SetEnabled(enabled)
+	end
+end
+
+local function setButtonEnabled(button, enabled)
+	if button and button.SetButtonEnabled then
+		button:SetButtonEnabled(enabled)
+	elseif button then
+		if enabled == false and button.Disable then
+			button:Disable()
+		elseif button.Enable then
+			button:Enable()
+		end
+	end
+end
+
+local function setInputValueIfNotFocused(input, value)
+	if not input then
+		return
+	end
+
+	if input.editBox and input.editBox.HasFocus and input.editBox:HasFocus() then
+		return
+	end
+
+	input:SetValue(value)
+end
+
+function HideSeek:EnsureWindow()
+	if gameWindow then
+		return gameWindow
+	end
+
+	if not WindowTool or not Form or not List then
+		WEP:Print("Hide and Seek UI tools are unavailable.")
+		return nil
+	end
+
+	local window, err = WindowTool.Create({
+		name = "WEPHideSeekWindow",
+		title = "Hide and Seek",
+		width = 540,
+		height = 430,
+		onShow = function()
+			self:RefreshWindow()
+			self:ScheduleWindowRefresh()
 		end,
 	})
+
+	if not window then
+		WEP:Print("Hide and Seek window failed:", err)
+		return nil
+	end
+
+	local content = window.content
+
+	window.statusText = content:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+	window.statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+	window.statusText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.statusText:SetJustifyH("LEFT")
+
+	window.detailText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	window.detailText:SetPoint("TOPLEFT", window.statusText, "BOTTOMLEFT", 0, -8)
+	window.detailText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.detailText:SetJustifyH("LEFT")
+
+	window.timerText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+	window.timerText:SetPoint("TOPLEFT", window.detailText, "BOTTOMLEFT", 0, -6)
+	window.timerText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.timerText:SetJustifyH("LEFT")
+
+	window.inviteInput = Form.CreateInput(content, {
+		label = "Invite player",
+		width = 170,
+		onEnterPressed = function()
+			self:InviteFromWindow()
+		end,
+	})
+	window.inviteInput:SetPoint("TOPLEFT", window.timerText, "BOTTOMLEFT", 0, -18)
+
+	window.inviteButton = Form.CreateButton(content, {
+		text = "Invite",
+		width = 80,
+		onClick = function()
+			self:InviteFromWindow()
+		end,
+	})
+	window.inviteButton:SetPoint("TOPLEFT", window.inviteInput, "TOPRIGHT", 12, 18)
+
+	window.hideInput = Form.CreateInput(content, {
+		label = "Hide seconds",
+		width = 92,
+		numeric = true,
+	})
+	window.hideInput:SetPoint("TOPLEFT", window.inviteButton, "TOPRIGHT", 18, -18)
+
+	window.seekInput = Form.CreateInput(content, {
+		label = "Seek seconds",
+		width = 92,
+		numeric = true,
+	})
+	window.seekInput:SetPoint("TOPLEFT", window.hideInput, "TOPRIGHT", 12, 0)
+
+	window.applyButton = Form.CreateButton(content, {
+		text = "Apply",
+		width = 78,
+		onClick = function()
+			self:ApplyWindowSettings()
+		end,
+	})
+	window.applyButton:SetPoint("TOPLEFT", window.seekInput, "TOPRIGHT", 12, 18)
+
+	window.rosterTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	window.rosterTitle:SetPoint("TOPLEFT", window.inviteInput, "BOTTOMLEFT", 0, -18)
+	window.rosterTitle:SetText("Roster")
+
+	window.rosterList = List.Create(content, {
+		width = 500,
+		visibleRows = 9,
+		rowHeight = 24,
+		emptyText = "No players in this game.",
+		columns = {
+			{
+				key = "name",
+				width = 190,
+			},
+			{
+				key = "role",
+				width = 185,
+			},
+			{
+				key = "state",
+				width = 100,
+			},
+		},
+	})
+	window.rosterList.frame:SetPoint("TOPLEFT", window.rosterTitle, "BOTTOMLEFT", 0, -8)
+
+	window.startButton = Form.CreateButton(window.footer, {
+		text = "Start",
+		width = 88,
+		onClick = function()
+			self:StartGame()
+		end,
+	})
+	window.startButton:SetPoint("LEFT", window.footer, "LEFT", 0, 0)
+
+	window.leaveButton = Form.CreateButton(window.footer, {
+		text = "Leave",
+		width = 88,
+		onClick = function()
+			self:LeaveGame()
+		end,
+	})
+	window.leaveButton:SetPoint("LEFT", window.startButton, "RIGHT", 8, 0)
+
+	window.refreshButton = Form.CreateButton(window.footer, {
+		text = "Refresh",
+		width = 88,
+		onClick = function()
+			self:RefreshWindow()
+		end,
+	})
+	window.refreshButton:SetPoint("LEFT", window.leaveButton, "RIGHT", 8, 0)
+
+	gameWindow = window
+	return gameWindow
+end
+
+function HideSeek:RefreshWindow()
+	local window = gameWindow
+	if not window or not window:IsShown() then
+		return
+	end
+
+	local canHostControl = self:CanHostControl()
+	local hasGame = self.gameId ~= nil
+	local canStart = canHostControl and self.status == STATUS_LOBBY and self:GetPlayerCount() >= 2
+
+	window.statusText:SetText("Game State: " .. getStatusLabel(self.status))
+	window.detailText:SetText(self:GetGameDetailText())
+	window.timerText:SetText(self:GetTimerText())
+	window.rosterList:SetItems(self:GetRosterItems())
+
+	setInputValueIfNotFocused(window.hideInput, self.hideSeconds)
+	setInputValueIfNotFocused(window.seekInput, self.seekSeconds)
+
+	setInputEnabled(window.inviteInput, canHostControl)
+	setInputEnabled(window.hideInput, canHostControl)
+	setInputEnabled(window.seekInput, canHostControl)
+	setButtonEnabled(window.inviteButton, canHostControl)
+	setButtonEnabled(window.applyButton, canHostControl)
+	setButtonEnabled(window.startButton, canStart)
+	setButtonEnabled(window.leaveButton, hasGame)
+	setButtonEnabled(window.refreshButton, true)
+end
+
+function HideSeek:ScheduleWindowRefresh()
+	if self.windowRefreshScheduled then
+		return
+	end
+
+	if not C_Timer or not C_Timer.After then
+		return
+	end
+
+	self.windowRefreshScheduled = true
+
+	Timer.After(1, function()
+		self.windowRefreshScheduled = false
+
+		if gameWindow and gameWindow:IsShown() then
+			self:RefreshWindow()
+			self:ScheduleWindowRefresh()
+		end
+	end)
+end
+
+function HideSeek:ShowWindow(focusInvite)
+	local window = self:EnsureWindow()
+	if not window then
+		return
+	end
+
+	window:Show()
+	self:RefreshWindow()
+
+	if focusInvite and window.inviteInput and window.inviteInput.editBox then
+		window.inviteInput.editBox:SetFocus()
+		window.inviteInput.editBox:HighlightText()
+	end
+end
+
+function HideSeek:InviteFromWindow()
+	local window = self:EnsureWindow()
+	if not window then
+		return
+	end
+
+	if self:InvitePlayer(window.inviteInput:GetValue()) then
+		window.inviteInput:SetValue("")
+	end
+
+	self:RefreshWindow()
+end
+
+function HideSeek:ApplyWindowSettings()
+	local window = self:EnsureWindow()
+	if not window then
+		return
+	end
+
+	if not self:EnsureHostLobby() then
+		self:RefreshWindow()
+		return
+	end
+
+	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
+	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
+	self:BroadcastState()
+	self:RefreshWindow()
+end
+
+function HideSeek:ShowMenu()
+	self:ShowWindow()
 end
 
 function HideSeek:HandleMenuAction(action)
@@ -708,142 +1002,12 @@ function HideSeek:HandleMenuAction(action)
 	end
 end
 
-function HideSeek:ShowPrompt(config)
-	local frame = ensurePromptFrame()
-	if not frame then
-		WEP:Print("Hide and Seek prompt is unavailable.")
-		return false
-	end
-
-	safeHideDialog()
-
-	local fields = config.fields or {}
-	frame.request = config
-	frame.title:SetText(config.title or "Hide and Seek")
-	frame.message:SetText(config.message or "")
-
-	local y = 84
-	local contentWidth = 328
-
-	for index = 1, 2 do
-		local field = fields[index]
-		local label = frame.labels[index]
-		local edit = frame.edits[index]
-
-		if field then
-			label:SetText(field.label or "")
-			label:ClearAllPoints()
-			label:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -y)
-			label:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -y)
-			label:Show()
-
-			edit:ClearAllPoints()
-			edit:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 4, -6)
-			edit:SetWidth(contentWidth - 8)
-			edit:SetText(tostring(field.value or ""))
-			edit:Show()
-
-			y = y + 54
-		else
-			label:Hide()
-			edit:Hide()
-		end
-	end
-
-	frame.okButton:ClearAllPoints()
-	frame.okButton:SetPoint("TOPRIGHT", frame, "TOP", -4, -(y + 12))
-	frame.cancelButton:ClearAllPoints()
-	frame.cancelButton:SetPoint("LEFT", frame.okButton, "RIGHT", 8, 0)
-	frame:SetHeight(y + 52)
-	frame:Show()
-
-	if frame.edits[1] and fields[1] then
-		frame.edits[1]:SetFocus()
-		frame.edits[1]:HighlightText()
-	end
-
-	return true
-end
-
-function HideSeek:SubmitPrompt()
-	local frame = promptFrame
-	local request = frame and frame.request
-
-	if not request then
-		return false
-	end
-
-	local values = {}
-
-	for index, field in ipairs(request.fields or {}) do
-		values[field.key or index] = trim(frame.edits[index]:GetText())
-	end
-
-	self:HidePrompt()
-
-	if type(request.onSubmit) == "function" then
-		request.onSubmit(values)
-	end
-
-	return true
-end
-
-function HideSeek:HidePrompt()
-	if promptFrame then
-		promptFrame.request = nil
-		promptFrame:Hide()
-	end
-end
-
 function HideSeek:ShowInvitePrompt()
-	if not self:EnsureHostLobby() then
-		return
-	end
-
-	self:ShowPrompt({
-		title = "Invite Hide and Seek Player",
-		message = "Enter the player name to invite.",
-		fields = {
-			{
-				key = "name",
-				label = "Player name",
-				value = "",
-			},
-		},
-		onSubmit = function(values)
-			self:InvitePlayer(values.name)
-		end,
-	})
+	self:ShowWindow(true)
 end
 
 function HideSeek:ShowSettingsPrompt()
-	if not self:EnsureHostLobby() then
-		return
-	end
-
-	self:ShowPrompt({
-		title = "Hide and Seek Settings",
-		message = "Set the hiding countdown and seeking time in seconds.",
-		fields = {
-			{
-				key = "hide",
-				label = "Hiding countdown seconds",
-				value = self.hideSeconds,
-			},
-			{
-				key = "seek",
-				label = "Seeking time seconds",
-				value = self.seekSeconds,
-			},
-		},
-		onSubmit = function(values)
-			self.hideSeconds = clamp(values.hide, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
-			self.seekSeconds = clamp(values.seek, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
-			WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
-			self:BroadcastState()
-			self:ShowMenu()
-		end,
-	})
+	self:ShowWindow()
 end
 
 function HideSeek:InvitePlayer(target)
@@ -852,16 +1016,16 @@ function HideSeek:InvitePlayer(target)
 	if target == "" then
 		WEP:Print("Hide and Seek invite needs a player name.")
 		self:ShowInvitePrompt()
-		return
+		return false
 	end
 
 	if not self:EnsureHostLobby() then
-		return
+		return false
 	end
 
 	if isSelfName(target) then
 		WEP:Print("You are already in the Hide and Seek lobby.")
-		return
+		return false
 	end
 
 	local ok, requestIdOrErr = Requests.Send(target, REQUEST_INVITE, {
@@ -873,12 +1037,14 @@ function HideSeek:InvitePlayer(target)
 
 	if not ok then
 		WEP:Print("Hide and Seek invite failed:", requestIdOrErr)
-		return
+		return false
 	end
 
 	self.pendingInvites[requestIdOrErr] = target
 	WEP:Print("Hide and Seek invite sent to", target .. ".")
 	self:BroadcastState()
+	self:RefreshWindow()
+	return true
 end
 
 function HideSeek:OnInviteRequest(request)
@@ -929,6 +1095,7 @@ function HideSeek:OnInviteRequest(request)
 				self:AddPlayer(host, false)
 				self:AddPlayer(Player.GetFullName(), false)
 				WEP:Print("Joined Hide and Seek lobby hosted by", host .. ".")
+				self:RefreshWindow()
 			else
 				WEP:Print("Declined Hide and Seek invite from", host .. ".")
 			end
@@ -956,6 +1123,7 @@ function HideSeek:OnInviteResponse(response)
 
 	if response.status == "declined" then
 		WEP:Print(response.sender, "declined Hide and Seek.")
+		self:RefreshWindow()
 	end
 end
 
@@ -976,7 +1144,7 @@ function HideSeek:BroadcastState()
 		return false
 	end
 
-	return self:Broadcast(MSG_STATE, {
+	local ok, messageIdOrErr = self:Broadcast(MSG_STATE, {
 		g = self.gameId,
 		h = self.host or "",
 		st = self.status or STATUS_IDLE,
@@ -986,6 +1154,9 @@ function HideSeek:BroadcastState()
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
 	})
+
+	self:RefreshWindow()
+	return ok, messageIdOrErr
 end
 
 function HideSeek:OnStateMessage(message)
@@ -1007,6 +1178,7 @@ function HideSeek:OnStateMessage(message)
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self:ApplyRoster(payload.p, payload.f)
+	self:RefreshWindow()
 end
 
 function HideSeek:PickRandomSeeker()
@@ -1082,9 +1254,11 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 	self.status = STATUS_HIDING
 	self.seekSeconds = seekSeconds
 	self.seekEndsAt = nil
+	self.hideEndsAt = (tonumber(startedAt) or Timer.Now()) + hideSeconds
+	self.resultReason = nil
 	self.timerToken = (self.timerToken or 0) + 1
 	local token = self.timerToken
-	local remaining = ((tonumber(startedAt) or Timer.Now()) + hideSeconds) - Timer.Now()
+	local remaining = self.hideEndsAt - Timer.Now()
 
 	if remaining < 0 then
 		remaining = 0
@@ -1104,6 +1278,8 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 			end
 		end)
 	end
+
+	self:RefreshWindow()
 end
 
 function HideSeek:BeginSeeking()
@@ -1113,6 +1289,7 @@ function HideSeek:BeginSeeking()
 
 	self.status = STATUS_SEEKING
 	self.seekEndsAt = Timer.Now() + self.seekSeconds
+	self.hideEndsAt = nil
 	self.timerToken = (self.timerToken or 0) + 1
 	local token = self.timerToken
 
@@ -1131,6 +1308,8 @@ function HideSeek:BeginSeeking()
 			self:FinishGame("time", true)
 		end
 	end)
+
+	self:RefreshWindow()
 end
 
 function HideSeek:ShowCountdown(seconds, startedAt, onComplete)
@@ -1258,6 +1437,7 @@ function HideSeek:MarkFound(playerName, foundBy, broadcast)
 		self:FinishGame("found", true)
 	end
 
+	self:RefreshWindow()
 	return true
 end
 
@@ -1281,10 +1461,13 @@ function HideSeek:FinishGame(reason, broadcast)
 	end
 
 	self.status = STATUS_ENDED
+	self.resultReason = reason or "ended"
 	self.timerToken = (self.timerToken or 0) + 1
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
+	self.hideEndsAt = nil
+	self.seekEndsAt = nil
 
 	if reason == "found" then
 		WEP:Print("Hide and Seek ended: seeker wins.")
@@ -1300,6 +1483,8 @@ function HideSeek:FinishGame(reason, broadcast)
 			r = reason or "ended",
 		})
 	end
+
+	self:RefreshWindow()
 end
 
 function HideSeek:OnEndMessage(message)
@@ -1365,8 +1550,11 @@ function HideSeek:ResetGame()
 	self.host = nil
 	self.seeker = nil
 	self.seekEndsAt = nil
+	self.hideEndsAt = nil
+	self.resultReason = nil
 	self.timerToken = (self.timerToken or 0) + 1
 	self:ResetRoster()
+	self:RefreshWindow()
 end
 
 function HideSeek:PrintStatus()
