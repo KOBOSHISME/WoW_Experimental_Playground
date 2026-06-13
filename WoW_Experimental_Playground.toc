@@ -13,6 +13,7 @@ Tools\Timer.lua
 Tools\Player.lua
 Tools\ChatChannels.lua
 Tools\ScreenOverlay.lua
+Tools\Requests.lua
 Comm\Protocol.lua
 Comm\Transport.lua
 Features\Diagnostics.lua

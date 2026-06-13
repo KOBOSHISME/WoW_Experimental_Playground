@@ -65,9 +65,29 @@ Reusable tools can be tested from chat with:
 /wep tools overlay blackout 50
 /wep tools overlay status
 /wep tools overlay hide
+/wep tools request send Playername debug note=hello
+/wep tools request respond 12345.1 Playername accepted
+/wep tools request status
 ```
 
 `/wep debug tools ...` is also supported as an alias for `/wep tools ...`.
+
+## Request Tool
+
+`WEP.Tools.Requests` provides a small request/response layer over the hidden communication channel. Future features can register request handlers, send typed requests to another addon user, and handle responses without adding UI.
+
+```lua
+WEP.Tools.Requests.RegisterRequestHandler("challenge", function(request)
+	-- Feature decides whether to accept, decline, or ignore.
+	WEP.Tools.Requests.Respond(request.id, request.sender, "accepted")
+end)
+
+WEP.Tools.Requests.RegisterResponseHandler("challenge", function(response)
+	-- Feature decides what accepted/declined/result means.
+end)
+
+WEP.Tools.Requests.Send("Playername", "challenge", { name = "duel" })
+```
 
 ## Installation
 
