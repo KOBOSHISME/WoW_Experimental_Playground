@@ -22,3 +22,4 @@ Comm\Protocol.lua
 Comm\Transport.lua
 Features\Diagnostics.lua
 Features\ToolDebug.lua
+Features\HideSeek.lua

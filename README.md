@@ -50,6 +50,18 @@ The addon includes a small hidden communication diagnostic feature:
 
 `/wep comm ping` sends a hidden discovery-channel ping. Other players with the addon respond with a `PONG` after a short randomized delay.
 
+## Hide and Seek
+
+The addon includes an addon-managed Hide and Seek challenge. Open it with:
+
+```text
+/wep hide
+```
+
+The menu lets the host invite players one at a time, set the hiding countdown and seeking time, start the game, print status, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
+
+During a game, the starter randomly chooses the seeker. The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The seeker marks hiders found by targeting them before the seek timer expires.
+
 ## Tool Debug Commands
 
 Reusable tools can be tested from chat with:
@@ -171,7 +183,7 @@ local status = WEP.Tools.UIVisibility.GetStatus()
 Managed groups are:
 
 ```text
-actionbars, unitframes, minimap, questtracker, chat, bags, micromenu, buffs, casting, mirrorbars
+actionbars, unitframes, minimap, map, questtracker, chat, bags, micromenu, buffs, casting, mirrorbars
 ```
 
 ## Environment Tool
