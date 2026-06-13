@@ -25,6 +25,15 @@ local REQUEST_MESSAGE_TYPE = "REQ"
 local RESPONSE_MESSAGE_TYPE = "REQ_RES"
 local BROADCAST_TARGET = "*"
 local DATA_PREFIX = "data:"
+local REQUEST_TTL_SECONDS = 300
+local RECEIVED_REQUEST_TTL_SECONDS = 600
+
+local ADDON_DISTRIBUTIONS = {
+	PARTY = true,
+	RAID = true,
+	GUILD = true,
+	WHISPER = true,
+}
 
 local RESERVED_PAYLOAD_KEYS = {
 	rid = true,
@@ -44,6 +53,28 @@ end
 
 local function isBlank(value)
 	return type(value) ~= "string" or value == ""
+end
+
+local function namesMatch(left, right)
+	if isBlank(left) or isBlank(right) then
+		return false
+	end
+
+	local normalizedLeft = normalizeName(left)
+	local normalizedRight = normalizeName(right)
+
+	if normalizedLeft == normalizedRight then
+		return true
+	end
+
+	local leftShort = normalizedLeft:match("^([^-]+)") or normalizedLeft
+	local rightShort = normalizedRight:match("^([^-]+)") or normalizedRight
+
+	if leftShort ~= rightShort then
+		return false
+	end
+
+	return not normalizedLeft:find("-", 1, true) or not normalizedRight:find("-", 1, true)
 end
 
 local function countEntries(values)
@@ -106,6 +137,47 @@ local function extractData(payload)
 	end
 
 	return data
+end
+
+local function copyOptions(options)
+	local copied = {}
+
+	if type(options) == "table" then
+		for key, value in pairs(options) do
+			copied[key] = value
+		end
+	end
+
+	return copied
+end
+
+local function getExpirySeconds(options, defaultValue)
+	if type(options) ~= "table" then
+		return defaultValue
+	end
+
+	local seconds = tonumber(options.ttl or options.timeout or options.expiresIn)
+	if not seconds or seconds <= 0 then
+		return defaultValue
+	end
+
+	return seconds
+end
+
+local function pruneExpiredRequests(now)
+	now = now or Timer.Now()
+
+	for requestId, request in pairs(Requests.pendingOutgoing) do
+		if request.expiresAt and request.expiresAt <= now then
+			Requests.pendingOutgoing[requestId] = nil
+		end
+	end
+
+	for requestId, request in pairs(Requests.receivedRequests) do
+		if request.expiresAt and request.expiresAt <= now then
+			Requests.receivedRequests[requestId] = nil
+		end
+	end
 end
 
 local function targetMatches(target)
@@ -200,6 +272,8 @@ function Requests.RegisterResponseHandler(requestType, callback)
 end
 
 function Requests.Send(target, requestType, data, options)
+	pruneExpiredRequests()
+
 	if isBlank(target) then
 		return false, "target is required"
 	end
@@ -222,22 +296,36 @@ function Requests.Send(target, requestType, data, options)
 
 	addDataToPayload(payload, copiedData)
 
-	local ok, messageIdOrErr = WEP.Comm:Send(REQUEST_MESSAGE_TYPE, payload, {
-		transport = "CHANNEL",
-	})
+	local sendOptions = copyOptions(options)
+	sendOptions.transport = sendOptions.transport and string.upper(tostring(sendOptions.transport)) or "CHANNEL"
+
+	if sendOptions.distribution then
+		sendOptions.distribution = string.upper(tostring(sendOptions.distribution))
+	end
+
+	if sendOptions.transport == "ADDON"
+		and sendOptions.distribution == "WHISPER"
+		and isBlank(sendOptions.target)
+	then
+		sendOptions.target = target
+	end
+
+	local ok, messageIdOrErr = WEP.Comm:Send(REQUEST_MESSAGE_TYPE, payload, sendOptions)
 
 	if not ok then
 		return false, messageIdOrErr
 	end
 
+	local now = Timer.Now()
 	Requests.pendingOutgoing[requestId] = {
 		id = requestId,
 		type = requestType,
 		target = target,
 		data = copiedData,
-		sentAt = Timer.Now(),
+		sentAt = now,
+		expiresAt = now + getExpirySeconds(sendOptions, REQUEST_TTL_SECONDS),
 		messageId = messageIdOrErr,
-		options = options or {},
+		options = sendOptions,
 	}
 	Requests.stats.sent = Requests.stats.sent + 1
 
@@ -245,6 +333,8 @@ function Requests.Send(target, requestType, data, options)
 end
 
 function Requests.Respond(requestId, target, status, data)
+	pruneExpiredRequests()
+
 	if isBlank(requestId) then
 		return false, "request id is required"
 	end
@@ -272,9 +362,24 @@ function Requests.Respond(requestId, target, status, data)
 
 	addDataToPayload(payload, copiedData)
 
-	local ok, messageIdOrErr = WEP.Comm:Send(RESPONSE_MESSAGE_TYPE, payload, {
+	local sendOptions = {
 		transport = "CHANNEL",
-	})
+	}
+
+	if receivedRequest and receivedRequest.transport and receivedRequest.transport ~= "CHANNEL" then
+		local distribution = string.upper(receivedRequest.transport)
+
+		if ADDON_DISTRIBUTIONS[distribution] then
+			sendOptions.transport = "ADDON"
+			sendOptions.distribution = distribution
+
+			if distribution == "WHISPER" then
+				sendOptions.target = target
+			end
+		end
+	end
+
+	local ok, messageIdOrErr = WEP.Comm:Send(RESPONSE_MESSAGE_TYPE, payload, sendOptions)
 
 	if not ok then
 		return false, messageIdOrErr
@@ -285,6 +390,8 @@ function Requests.Respond(requestId, target, status, data)
 end
 
 function Requests:OnRequestMessage(message)
+	pruneExpiredRequests()
+
 	local payload = message.payload
 	local requestId = type(payload) == "table" and payload.rid or nil
 	local requestType = type(payload) == "table" and payload.rtype or nil
@@ -303,6 +410,7 @@ function Requests:OnRequestMessage(message)
 		data = extractData(payload),
 		receivedAt = message.receivedAt or Timer.Now(),
 		transport = message.transport,
+		expiresAt = Timer.Now() + RECEIVED_REQUEST_TTL_SECONDS,
 	}
 
 	self.receivedRequests[requestId] = request
@@ -312,6 +420,8 @@ function Requests:OnRequestMessage(message)
 end
 
 function Requests:OnResponseMessage(message)
+	pruneExpiredRequests()
+
 	local payload = message.payload
 	local requestId = type(payload) == "table" and payload.rid or nil
 	local target = type(payload) == "table" and payload.target or nil
@@ -323,7 +433,17 @@ function Requests:OnResponseMessage(message)
 	end
 
 	local pendingRequest = self.pendingOutgoing[requestId]
-	local requestType = (pendingRequest and pendingRequest.type) or payload.rtype or ""
+	if not pendingRequest then
+		self.stats.ignored = self.stats.ignored + 1
+		return
+	end
+
+	if pendingRequest.target ~= BROADCAST_TARGET and not namesMatch(message.sender, pendingRequest.target) then
+		self.stats.ignored = self.stats.ignored + 1
+		return
+	end
+
+	local requestType = pendingRequest.type
 	local response = {
 		id = requestId,
 		type = requestType,
@@ -346,6 +466,8 @@ function Requests:OnResponseMessage(message)
 end
 
 function Requests.GetStatus()
+	pruneExpiredRequests()
+
 	return {
 		pendingOutgoingCount = countEntries(Requests.pendingOutgoing),
 		receivedRequestCount = countEntries(Requests.receivedRequests),

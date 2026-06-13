@@ -83,10 +83,14 @@ local function normalizeOption(option, index)
 		return nil, "dialog option text is required"
 	end
 
+	if value == nil then
+		value = text
+	end
+
 	return {
 		index = index,
 		text = text,
-		value = value ~= nil and value or text,
+		value = value,
 	}
 end
 
