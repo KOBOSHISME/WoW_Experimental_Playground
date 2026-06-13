@@ -12,6 +12,7 @@ Utils\Hash.lua
 Tools\Timer.lua
 Tools\Player.lua
 Tools\ChatChannels.lua
+Tools\Sound.lua
 Tools\ScreenOverlay.lua
 Tools\UIVisibility.lua
 Tools\Environment.lua

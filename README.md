@@ -62,6 +62,12 @@ Reusable tools can be tested from chat with:
 /wep tools timer after 2
 /wep tools chat normalize General
 /wep tools chat getid General
+/wep tools sound list
+/wep tools sound play ui_select duration=1
+/wep tools sound play game:852 channel=sfx
+/wep tools sound play wep_alert duration=1
+/wep tools sound play custom:wep-alert.wav duration=1
+/wep tools sound status
 /wep tools overlay blackout 50
 /wep tools overlay status
 /wep tools overlay hide
@@ -100,6 +106,25 @@ end)
 WEP.Tools.Requests.Send("Playername", "challenge", { name = "duel" })
 ```
 
+## Sound Tool
+
+`WEP.Tools.Sound` plays game sound kits and addon-local custom sound files. Custom files should live under `Sounds\Custom` so they are saved with the repo and installed with the addon.
+
+```lua
+WEP.Tools.Sound.Play("ui_select")
+WEP.Tools.Sound.Play("game:852", { channel = "SFX", duration = 1 })
+WEP.Tools.Sound.Play("wep_alert", { duration = 1 })
+WEP.Tools.Sound.Play("custom:wep-alert.wav", { duration = 1 })
+WEP.Tools.Sound.PlayCustom("wep-alert.wav")
+```
+
+Supported options are:
+
+- `channel`: WoW sound channel such as `Master`, `SFX`, `Music`, `Ambience`, or `Dialog`.
+- `duration`: seconds before stopping playback, when the client returns a sound handle.
+- `fadeOut`: optional fade-out seconds used when stopping a handled sound.
+- `volume`: accepted as `0-100` or `0-1`; `0` skips playback, but WoW Classic does not support per-sound volume without changing global sound settings.
+
 ## UI Visibility Tool
 
 `WEP.Tools.UIVisibility` controls screenshot-style full UI visibility and managed Blizzard UI groups at runtime. It does not persist hidden state across reloads.
@@ -120,6 +145,7 @@ Managed groups are:
 ```text
 actionbars, unitframes, minimap, questtracker, chat, bags, micromenu, buffs, casting, mirrorbars
 ```
+
 ## Environment Tool
 
 `WEP.Tools.Environment` provides snapshots of the current zone, map, instance state, PvP state, player flags, and units exposed by the WoW API. Unit discovery is limited to addressable tokens such as target, mouseover, focus, boss units, group units, pets, and visible nameplates.

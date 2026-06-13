@@ -6,6 +6,7 @@ WEP.ToolDebug = ToolDebug
 local Timer = WEP.Tools.Timer
 local Player = WEP.Tools.Player
 local ChatChannels = WEP.Tools.ChatChannels
+local Sound = WEP.Tools.Sound
 local ScreenOverlay = WEP.Tools.ScreenOverlay
 local UIVisibility = WEP.Tools.UIVisibility
 local Requests = WEP.Tools.Requests
@@ -161,6 +162,11 @@ function ToolDebug:HandleSlash(args)
 		return
 	end
 
+	if toolName == "sound" or toolName == "sounds" then
+		self:HandleSound(args)
+		return
+	end
+
 	if toolName == "overlay" or toolName == "screen" or toolName == "screenoverlay" then
 		self:HandleScreenOverlay(args)
 		return
@@ -193,6 +199,10 @@ function ToolDebug.PrintHelp()
 	WEP:Print("/wep tools timer after [seconds] - Schedule a timer callback.")
 	WEP:Print("/wep tools chat normalize <channel> - Normalize a chat channel name.")
 	WEP:Print("/wep tools chat getid <channel> - Print a chat channel id.")
+	WEP:Print("/wep tools sound list - List registered sound names.")
+	WEP:Print("/wep tools sound play <name|game:id|custom:file> [key=value ...] - Play a sound.")
+	WEP:Print("/wep tools sound stop <handle|all> [fadeout] - Stop tracked sound playback.")
+	WEP:Print("/wep tools sound status - Print sound tool state.")
 	WEP:Print("/wep tools overlay blackout <0-100> - Set blackout percentage.")
 	WEP:Print("/wep tools overlay hide - Hide the blackout overlay.")
 	WEP:Print("/wep tools overlay status - Print the current blackout percentage.")
@@ -210,7 +220,7 @@ function ToolDebug.PrintHelp()
 end
 
 function ToolDebug.PrintList()
-	WEP:Print("Testable tools: player, timer, chat, overlay, ui, environment, request.")
+	WEP:Print("Testable tools: player, timer, chat, sound, overlay, ui, environment, request.")
 end
 
 function ToolDebug.PrintPlayer()
@@ -260,6 +270,198 @@ function ToolDebug:HandleChatChannels(args)
 	end
 
 	WEP:Print("Usage: /wep tools chat normalize|getid <channel>")
+end
+
+function ToolDebug:HandleSound(args)
+	if not Sound then
+		WEP:Print("Sound tool unavailable.")
+		return
+	end
+
+	local action = args[3] or "list"
+
+	if action == "list" then
+		self:PrintSoundList()
+		return
+	end
+
+	if action == "status" then
+		self:PrintSoundStatus()
+		return
+	end
+
+	if action == "play" then
+		local soundName = args[4]
+
+		if not soundName then
+			WEP:Print("Usage: /wep tools sound play <name|game:id|custom:file> [volume=0-100] [duration=seconds] [channel=master]")
+			return
+		end
+
+		local options, optionsErr = parseKeyValueArgs(args, 5)
+		if not options then
+			WEP:Print("Sound option error:", optionsErr)
+			return
+		end
+
+		self:PlaySound(soundName, options)
+		return
+	end
+
+	if action == "game" then
+		local soundKit = args[4]
+
+		if not soundKit then
+			WEP:Print("Usage: /wep tools sound game <soundKitId> [key=value ...]")
+			return
+		end
+
+		local options, optionsErr = parseKeyValueArgs(args, 5)
+		if not options then
+			WEP:Print("Sound option error:", optionsErr)
+			return
+		end
+
+		self:PlaySound("game:" .. soundKit, options)
+		return
+	end
+
+	if action == "custom" then
+		local fileName = args[4]
+
+		if not fileName then
+			WEP:Print("Usage: /wep tools sound custom <file-in-sounds-custom> [key=value ...]")
+			return
+		end
+
+		local options, optionsErr = parseKeyValueArgs(args, 5)
+		if not options then
+			WEP:Print("Sound option error:", optionsErr)
+			return
+		end
+
+		local ok, playbackOrErr = Sound.PlayCustom(fileName, options)
+		self:PrintSoundPlaybackResult(ok, playbackOrErr)
+		return
+	end
+
+	if action == "file" then
+		local path = args[4]
+
+		if not path then
+			WEP:Print("Usage: /wep tools sound file <interface-path> [key=value ...]")
+			return
+		end
+
+		local options, optionsErr = parseKeyValueArgs(args, 5)
+		if not options then
+			WEP:Print("Sound option error:", optionsErr)
+			return
+		end
+
+		local ok, playbackOrErr = Sound.PlayFile(path, options)
+		self:PrintSoundPlaybackResult(ok, playbackOrErr)
+		return
+	end
+
+	if action == "stop" then
+		local handle = args[4]
+		local fadeOut = tonumber(args[5]) or 0
+
+		if handle == "all" then
+			WEP:Print("Sounds stopped:", Sound.StopAll(fadeOut))
+			return
+		end
+
+		handle = tonumber(handle) or handle
+		local ok, err = Sound.Stop(handle, fadeOut)
+		if ok then
+			WEP:Print("Sound stopped:", handle)
+		else
+			WEP:Print("Sound stop failed:", err)
+		end
+
+		return
+	end
+
+	WEP:Print("Usage: /wep tools sound list|play|game|custom|file|stop|status")
+end
+
+function ToolDebug:PlaySound(soundName, options)
+	local ok, playbackOrErr = Sound.Play(soundName, options)
+	self:PrintSoundPlaybackResult(ok, playbackOrErr)
+end
+
+function ToolDebug:PrintSoundPlaybackResult(ok, playbackOrErr)
+	if not ok then
+		WEP:Print("Sound failed:", playbackOrErr)
+		return
+	end
+
+	local playback = playbackOrErr
+
+	if playback.skipped then
+		WEP:Print("Sound skipped:", playback.reason)
+		return
+	end
+
+	WEP:Print(
+		"Sound played:",
+		playback.name,
+		"kind:",
+		playback.kind,
+		"channel:",
+		playback.channel,
+		"handle:",
+		formatOptional(playback.handle)
+	)
+
+	if playback.duration then
+		WEP:Print(
+			"Duration:",
+			playback.duration,
+			playback.durationApplied and "scheduled" or "not supported for this playback"
+		)
+	end
+
+	if playback.volume ~= 100 then
+		WEP:Print("Volume option:", playback.volume, playback.volumeApplied and "applied" or "not supported by WoW per sound")
+	end
+end
+
+function ToolDebug:PrintSoundList()
+	local gameSounds = Sound.GetGameSounds()
+	local customSounds = Sound.GetCustomSounds()
+	local gameNames = {}
+	local customNames = {}
+
+	for _, sound in ipairs(gameSounds) do
+		gameNames[#gameNames + 1] = sound.name
+	end
+
+	for _, sound in ipairs(customSounds) do
+		customNames[#customNames + 1] = sound.name
+	end
+
+	WEP:Print("Game sounds:", #gameNames > 0 and table.concat(gameNames, ", ") or "none")
+	WEP:Print("Custom sounds:", #customNames > 0 and table.concat(customNames, ", ") or "none")
+	WEP:Print("Custom files can be played with custom:<filename> from Sounds\\Custom.")
+end
+
+function ToolDebug:PrintSoundStatus()
+	local status = Sound.GetStatus()
+
+	WEP:Print(
+		"Sounds played:",
+		status.stats.played,
+		"failed:",
+		status.stats.failed,
+		"skipped:",
+		status.stats.skipped,
+		"stopped:",
+		status.stats.stopped
+	)
+	WEP:Print("Active handles:", status.activeCount, "per-sound volume:", status.volumeSupported and "supported" or "not supported")
 end
 
 function ToolDebug:HandleScreenOverlay(args)
