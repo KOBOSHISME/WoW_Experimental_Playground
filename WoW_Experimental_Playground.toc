@@ -15,6 +15,7 @@ Tools\ChatChannels.lua
 Tools\Sound.lua
 Tools\ScreenOverlay.lua
 Tools\UIVisibility.lua
+Tools\Dialog.lua
 Tools\Environment.lua
 Tools\Requests.lua
 Comm\Protocol.lua

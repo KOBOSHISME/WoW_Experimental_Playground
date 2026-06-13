@@ -9,6 +9,7 @@ local ChatChannels = WEP.Tools.ChatChannels
 local Sound = WEP.Tools.Sound
 local ScreenOverlay = WEP.Tools.ScreenOverlay
 local UIVisibility = WEP.Tools.UIVisibility
+local Dialog = WEP.Tools.Dialog
 local Requests = WEP.Tools.Requests
 local Environment = WEP.Tools.Environment
 
@@ -177,6 +178,11 @@ function ToolDebug:HandleSlash(args)
 		return
 	end
 
+	if toolName == "dialog" or toolName == "dialogs" then
+		self:HandleDialog(args)
+		return
+	end
+
 	if toolName == "environment" or toolName == "env" then
 		self:HandleEnvironment(args)
 		return
@@ -210,6 +216,8 @@ function ToolDebug.PrintHelp()
 	WEP:Print("/wep tools ui hide|show|toggle <group> - Control a UI group.")
 	WEP:Print("/wep tools ui show managed - Restore all managed UI groups.")
 	WEP:Print("/wep tools ui groups|status - Inspect UI visibility state.")
+	WEP:Print("/wep tools dialog sample - Show a three-option dialog.")
+	WEP:Print("/wep tools dialog hide|status - Control or inspect the active dialog.")
 	WEP:Print("/wep tools environment status - Print environment summary.")
 	WEP:Print("/wep tools environment location - Print location details.")
 	WEP:Print("/wep tools environment unit [unit] - Print one unit, default target.")
@@ -220,7 +228,7 @@ function ToolDebug.PrintHelp()
 end
 
 function ToolDebug.PrintList()
-	WEP:Print("Testable tools: player, timer, chat, sound, overlay, ui, environment, request.")
+	WEP:Print("Testable tools: player, timer, chat, sound, overlay, ui, dialog, environment, request.")
 end
 
 function ToolDebug.PrintPlayer()
@@ -605,6 +613,84 @@ function ToolDebug.PrintUIVisibilityStatus()
 			group.frameCount
 		)
 	end
+end
+
+function ToolDebug:HandleDialog(args)
+	if not Dialog then
+		WEP:Print("Dialog tool unavailable.")
+		return
+	end
+
+	local action = args[3] or "sample"
+
+	if action == "sample" then
+		self:ShowSampleDialog()
+		return
+	end
+
+	if action == "hide" or action == "cancel" then
+		local ok, resultOrErr = Dialog.Hide("debug")
+		if not ok then
+			WEP:Print("Dialog hide failed:", resultOrErr)
+			return
+		end
+
+		WEP:Print("Dialog hidden:", resultOrErr.id)
+		return
+	end
+
+	if action == "status" then
+		self:PrintDialogStatus()
+		return
+	end
+
+	WEP:Print("Usage: /wep tools dialog sample|hide|status")
+end
+
+function ToolDebug:ShowSampleDialog()
+	local ok, idOrErr = Dialog.Show({
+		title = "WEP Dialog Tool",
+		message = "Choose one of the available results.",
+		options = {
+			{
+				text = "Accept",
+				value = "accepted",
+			},
+			{
+				text = "Decline",
+				value = "declined",
+			},
+			{
+				text = "Ask Later",
+				value = "later",
+			},
+		},
+		onSelect = function(result)
+			if result.canceled then
+				WEP:Print("Dialog canceled:", result.id, "reason:", formatOptional(result.reason))
+				return
+			end
+
+			WEP:Print("Dialog selected:", result.id, "index:", result.index, "value:", result.value)
+		end,
+	})
+
+	if ok then
+		WEP:Print("Dialog shown:", idOrErr)
+	else
+		WEP:Print("Dialog failed:", idOrErr)
+	end
+end
+
+function ToolDebug.PrintDialogStatus()
+	local status = Dialog.GetStatus()
+
+	if not status.active then
+		WEP:Print("Dialog status: inactive")
+		return
+	end
+
+	WEP:Print("Dialog status:", status.id, "title:", status.title, "options:", status.optionCount)
 end
 
 function ToolDebug:HandleEnvironment(args)

@@ -78,6 +78,9 @@ Reusable tools can be tested from chat with:
 /wep tools ui hide minimap
 /wep tools ui show managed
 /wep tools ui status
+/wep tools dialog sample
+/wep tools dialog status
+/wep tools dialog hide
 /wep tools environment status
 /wep tools environment location
 /wep tools environment unit target
@@ -105,6 +108,31 @@ end)
 
 WEP.Tools.Requests.Send("Playername", "challenge", { name = "duel" })
 ```
+
+## Dialog Tool
+
+`WEP.Tools.Dialog` displays an in-game dialog with one or more options and returns the selected result through a callback.
+
+```lua
+WEP.Tools.Dialog.Show({
+	title = "Challenge Request",
+	message = "How do you want to respond?",
+	options = {
+		{ text = "Accept", value = "accepted" },
+		{ text = "Decline", value = "declined" },
+		{ text = "Ask Later", value = "later" },
+	},
+	onSelect = function(result)
+		if result.canceled then
+			return
+		end
+
+		WEP:Print("Selected:", result.value)
+	end,
+})
+```
+
+The result table includes `id`, `title`, `message`, `canceled`, `reason`, and, when an option was selected, `index`, `text`, and `value`.
 
 ## Sound Tool
 
