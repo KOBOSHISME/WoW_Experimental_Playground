@@ -11,10 +11,12 @@ Utils\Text.lua
 Utils\Hash.lua
 Tools\Timer.lua
 Tools\Player.lua
+Tools\Party.lua
 Tools\ChatChannels.lua
 Tools\Sound.lua
 Tools\ScreenOverlay.lua
 Tools\UIVisibility.lua
+Tools\Interference.lua
 Tools\Dialog.lua
 Tools\Window.lua
 Tools\Form.lua
@@ -27,3 +29,4 @@ Features\FeaturePanel.lua
 Features\Diagnostics.lua
 Features\ToolDebug.lua
 Features\HideSeek.lua
+Features\PartyInterference.lua

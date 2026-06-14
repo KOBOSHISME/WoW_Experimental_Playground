@@ -82,6 +82,19 @@ During a game, the starter randomly chooses the seeker unless one is selected. T
 
 The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The starting spot is marked as a user waypoint on supported clients so hiders can see it on the map and minimap; the tracker also shows start-spot distance and play-area status for participants, including the seeker while their map UI is hidden. The map and minimap tint everything outside the play-area radius red and mark the starting spot. If a hider stays outside the play area for 5 seconds, that hider is counted found; if the seeker stays outside, the seeker loses. The seeker tags a hider by targeting them, then must return to the starting spot to mark that hider found. Hiders become safe by reaching the starting spot and staying there for 1 second while the seeker is away. If all hiders become safe, hiders win. If any hider is found, the seeker wins and that hider is preselected as the next seeker. If the seek timer expires first, hiders win. If the host enabled Star reveals, the seeker's tracker includes a Reveal button that briefly places the Star raid target icon on addressable, active hiders. After a game ends, the host can use Start Again in the same Hide and Seek window to reuse the current roster.
 
+## Party Interference
+
+Party Interference is a small party-only prank feature. Open it with:
+
+```text
+/wep interfere
+/wep prank
+```
+
+The window lists current `party1` through `party4` members. Select a party member, choose a bounded duration and darkness value, then send one of the core interference actions: darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent.
+
+Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Durations are clamped to 1-30 seconds, blackout intensity is clamped to 10-95%, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
+
 ## Tool Debug Commands
 
 Reusable tools can be tested from chat with:

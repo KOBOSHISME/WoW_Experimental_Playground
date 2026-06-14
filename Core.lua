@@ -19,6 +19,7 @@ local DEFAULTS = {
 	},
 	features = {
 		hideSeek = true,
+		partyInterference = true,
 		toolDebug = true,
 	},
 	log = {

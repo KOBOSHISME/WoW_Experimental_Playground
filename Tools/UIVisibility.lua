@@ -321,6 +321,14 @@ local function normalizeGroup(group)
 	return GROUP_ALIASES[key]
 end
 
+local function makeOwnerKey(owner, groupName)
+	if owner == nil or tostring(owner) == "" then
+		owner = "default"
+	end
+
+	return tostring(owner) .. ":" .. tostring(groupName or "")
+end
+
 local function snapshotPoints(frame)
 	local points = {}
 	local count = safeCall(frame.GetNumPoints, frame) or 0
@@ -440,14 +448,14 @@ local function resolveGroupFrames(groupName)
 	return frames
 end
 
-local function markFrameForGroup(frame, groupName, framesToHide)
+local function markFrameForOwner(frame, ownerKey, framesToHide)
 	local state = getFrameState(frame)
 
-	if state.hiddenBy[groupName] then
+	if state.hiddenBy[ownerKey] then
 		return
 	end
 
-	state.hiddenBy[groupName] = true
+	state.hiddenBy[ownerKey] = true
 	state.hiddenByCount = state.hiddenByCount + 1
 
 	if state.hiddenByCount == 1 then
@@ -455,14 +463,14 @@ local function markFrameForGroup(frame, groupName, framesToHide)
 	end
 end
 
-local function restoreFrameForGroup(frame, groupName)
+local function restoreFrameForOwner(frame, ownerKey)
 	local state = UIVisibility.frameStates[frame]
 
-	if not state or not state.hiddenBy[groupName] then
+	if not state or not state.hiddenBy[ownerKey] then
 		return
 	end
 
-	state.hiddenBy[groupName] = nil
+	state.hiddenBy[ownerKey] = nil
 	state.hiddenByCount = state.hiddenByCount - 1
 
 	if state.hiddenByCount <= 0 then
@@ -471,14 +479,15 @@ local function restoreFrameForGroup(frame, groupName)
 	end
 end
 
-local function hideGroup(groupName)
+local function hideGroup(groupName, ownerKey)
+	ownerKey = ownerKey or makeOwnerKey(nil, groupName)
 	local groupState = UIVisibility.groupStates[groupName]
 
-	if groupState and groupState.hidden then
+	if groupState and groupState.owners and groupState.owners[ownerKey] then
 		return true, "applied", groupName
 	end
 
-	local frames = resolveGroupFrames(groupName)
+	local frames = groupState and groupState.frames or resolveGroupFrames(groupName)
 	local framesToHide = {}
 
 	if #frames > 0 and not ensureHiddenParent() then
@@ -486,7 +495,7 @@ local function hideGroup(groupName)
 	end
 
 	for _, frame in ipairs(frames) do
-		markFrameForGroup(frame, groupName, framesToHide)
+		markFrameForOwner(frame, ownerKey, framesToHide)
 	end
 
 	for _, frame in ipairs(framesToHide) do
@@ -496,26 +505,68 @@ local function hideGroup(groupName)
 		end
 	end
 
-	UIVisibility.groupStates[groupName] = {
-		hidden = true,
-		frames = frames,
-	}
+	if not groupState then
+		groupState = {
+			hidden = true,
+			frames = frames,
+			owners = {},
+			ownerCount = 0,
+		}
+		UIVisibility.groupStates[groupName] = groupState
+	else
+		groupState.owners = groupState.owners or {}
+		groupState.ownerCount = groupState.ownerCount or 0
+	end
+
+	groupState.owners[ownerKey] = true
+	groupState.ownerCount = (groupState.ownerCount or 0) + 1
+	groupState.hidden = groupState.ownerCount > 0
 
 	return true, "applied", groupName
 end
 
-local function showGroup(groupName)
+local function showGroup(groupName, ownerKey, allOwners)
+	ownerKey = ownerKey or makeOwnerKey(nil, groupName)
 	local groupState = UIVisibility.groupStates[groupName]
 
 	if not groupState or not groupState.hidden then
 		return true, "applied", groupName
 	end
 
-	for _, frame in ipairs(groupState.frames or {}) do
-		restoreFrameForGroup(frame, groupName)
+	if allOwners then
+		local ownerKeys = {}
+
+		for currentOwnerKey in pairs(groupState.owners or {}) do
+			ownerKeys[#ownerKeys + 1] = currentOwnerKey
+		end
+
+		for _, currentOwnerKey in ipairs(ownerKeys) do
+			for _, frame in ipairs(groupState.frames or {}) do
+				restoreFrameForOwner(frame, currentOwnerKey)
+			end
+
+			groupState.owners[currentOwnerKey] = nil
+		end
+
+		groupState.ownerCount = 0
+	else
+		if not groupState.owners or not groupState.owners[ownerKey] then
+			return true, "applied", groupName
+		end
+
+		for _, frame in ipairs(groupState.frames or {}) do
+			restoreFrameForOwner(frame, ownerKey)
+		end
+
+		groupState.owners[ownerKey] = nil
+		groupState.ownerCount = (groupState.ownerCount or 1) - 1
 	end
 
-	UIVisibility.groupStates[groupName] = nil
+	if (groupState.ownerCount or 0) <= 0 then
+		UIVisibility.groupStates[groupName] = nil
+	else
+		groupState.hidden = true
+	end
 
 	return true, "applied", groupName
 end
@@ -622,7 +673,7 @@ function UIVisibility.Hide(group)
 		group = groupName,
 	})
 	local ok, state, appliedGroupName = queueOrRun(function()
-		return hideGroup(groupName)
+		return hideGroup(groupName, makeOwnerKey(nil, groupName))
 	end)
 	WEP:Log("UIVisibility", "hide_group_result", {
 		group = appliedGroupName or groupName,
@@ -647,7 +698,7 @@ function UIVisibility.Show(group)
 		group = groupName,
 	})
 	local ok, state, appliedGroupName = queueOrRun(function()
-		return showGroup(groupName)
+		return showGroup(groupName, makeOwnerKey(nil, groupName))
 	end)
 	WEP:Log("UIVisibility", "show_group_result", {
 		group = appliedGroupName or groupName,
@@ -679,11 +730,69 @@ function UIVisibility.Toggle(group)
 	return UIVisibility.Hide(groupName)
 end
 
+function UIVisibility.HideFor(owner, group)
+	local groupName = normalizeGroup(group)
+
+	if not groupName then
+		WEP:Log("UIVisibility", "hide_group_for_owner_failed", {
+			group = group,
+			owner = owner or "none",
+			error = "unknown group",
+		}, "error")
+		return false, "unknown UI group: " .. tostring(group)
+	end
+
+	local ownerKey = makeOwnerKey(owner, groupName)
+	WEP:Log("UIVisibility", "hide_group_for_owner_requested", {
+		group = groupName,
+		owner = ownerKey,
+	})
+	local ok, state, appliedGroupName = queueOrRun(function()
+		return hideGroup(groupName, ownerKey)
+	end)
+	WEP:Log("UIVisibility", "hide_group_for_owner_result", {
+		group = appliedGroupName or groupName,
+		owner = ownerKey,
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state, appliedGroupName
+end
+
+function UIVisibility.ShowFor(owner, group)
+	local groupName = normalizeGroup(group)
+
+	if not groupName then
+		WEP:Log("UIVisibility", "show_group_for_owner_failed", {
+			group = group,
+			owner = owner or "none",
+			error = "unknown group",
+		}, "error")
+		return false, "unknown UI group: " .. tostring(group)
+	end
+
+	local ownerKey = makeOwnerKey(owner, groupName)
+	WEP:Log("UIVisibility", "show_group_for_owner_requested", {
+		group = groupName,
+		owner = ownerKey,
+	})
+	local ok, state, appliedGroupName = queueOrRun(function()
+		return showGroup(groupName, ownerKey)
+	end)
+	WEP:Log("UIVisibility", "show_group_for_owner_result", {
+		group = appliedGroupName or groupName,
+		owner = ownerKey,
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state, appliedGroupName
+end
+
 function UIVisibility.ShowEverythingManaged()
 	WEP:Log("UIVisibility", "show_managed_requested")
 	local ok, state = queueOrRun(function()
 		for _, groupName in ipairs(GROUP_ORDER) do
-			showGroup(groupName)
+			showGroup(groupName, nil, true)
 		end
 
 		return true, "applied"
@@ -706,7 +815,8 @@ function UIVisibility.GetStatus()
 
 	for _, groupName in ipairs(GROUP_ORDER) do
 		local frameCount = #resolveGroupFrames(groupName)
-		local hidden = UIVisibility.groupStates[groupName] and UIVisibility.groupStates[groupName].hidden == true or false
+		local groupState = UIVisibility.groupStates[groupName]
+		local hidden = groupState and (groupState.ownerCount or 0) > 0 or false
 
 		groups[#groups + 1] = {
 			name = groupName,
