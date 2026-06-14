@@ -179,6 +179,13 @@ function Environment.GetLocation()
 	}
 end
 
+function Environment.GetPlayerMapPosition()
+	local mapId = C_Map and C_Map.GetBestMapForUnit and safeCall(C_Map.GetBestMapForUnit, "player") or nil
+	local x, y = getMapPosition(mapId)
+
+	return mapId, x, y
+end
+
 function Environment.GetUnit(unit)
 	if type(unit) ~= "string" or unit == "" or not UnitExists or not UnitExists(unit) then
 		return nil

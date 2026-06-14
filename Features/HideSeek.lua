@@ -3,6 +3,7 @@ local _, WEP = ...
 local HideSeek = {
 	hideSeconds = 30,
 	seekSeconds = 300,
+	startRadius = 1,
 	starRevealUses = 0,
 	starRevealUsesRemaining = 0,
 	players = {},
@@ -39,6 +40,11 @@ local MSG_START = "hide_seek_start"
 local MSG_FOUND = "hide_seek_found"
 local MSG_END = "hide_seek_end"
 local MSG_LEAVE = "hide_seek_leave"
+local MSG_START_SPOT_REQUEST = "hide_seek_start_spot_request"
+local MSG_START_SPOT = "hide_seek_start_spot"
+local MSG_SEEKER_SPOT = "hide_seek_seeker_spot"
+local MSG_TAGGED = "hide_seek_tagged"
+local MSG_SAFE = "hide_seek_safe"
 
 local STATUS_IDLE = "idle"
 local STATUS_LOBBY = "lobby"
@@ -50,6 +56,12 @@ local MIN_HIDE_SECONDS = 5
 local MAX_HIDE_SECONDS = 300
 local MIN_SEEK_SECONDS = 30
 local MAX_SEEK_SECONDS = 3600
+local MIN_START_RADIUS = 1
+local MAX_START_RADIUS = 100
+local HOME_CHECK_INTERVAL_SECONDS = 1
+local SAFE_CONFIRM_SECONDS = 1
+local SEEKER_SPOT_STALE_SECONDS = 3
+local START_SPOT_RESPONSE_TIMEOUT_SECONDS = 10
 local MIN_STAR_REVEAL_USES = 0
 local MAX_STAR_REVEAL_USES = 99
 local STAR_REVEAL_ICON = 1
@@ -77,6 +89,7 @@ local TARGET_BINDING_OWNER_NAME = "WEPHideSeekTargetBindingOwner"
 local TARGET_BINDING_BUTTON_NAME = "WEPHideSeekTargetBindingBlocker"
 
 local countdownFrame
+local homeStatusFrame
 local gameWindow
 local trackerWindow
 local targetBindingOwner
@@ -270,6 +283,32 @@ local function ensureCountdownFrame()
 	return countdownFrame
 end
 
+local function ensureHomeStatusFrame()
+	if homeStatusFrame then
+		return homeStatusFrame
+	end
+
+	if not CreateFrame or not UIParent then
+		return nil
+	end
+
+	local frame = CreateFrame("Frame", "WEPHideSeekHomeStatusFrame", UIParent)
+	frame:SetAllPoints(UIParent)
+	frame:SetFrameStrata("FULLSCREEN_DIALOG")
+	frame:SetFrameLevel(78)
+	frame:EnableMouse(false)
+	frame:Hide()
+
+	frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+	frame.text:SetPoint("CENTER", frame, "CENTER", 0, 0)
+	frame.text:SetJustifyH("CENTER")
+	frame.text:SetJustifyV("MIDDLE")
+	frame.text:SetTextColor(0.25, 1, 0.45, 1)
+
+	homeStatusFrame = frame
+	return homeStatusFrame
+end
+
 function HideSeek:IsEnabled()
 	return WEP:IsFeatureEnabled(FEATURE_ID)
 end
@@ -357,6 +396,46 @@ function HideSeek:Initialize()
 		self:OnLeaveMessage(message)
 	end)
 
+	WEP.Comm:RegisterHandler(MSG_START_SPOT_REQUEST, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
+		self:OnStartSpotRequestMessage(message)
+	end)
+
+	WEP.Comm:RegisterHandler(MSG_START_SPOT, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
+		self:OnStartSpotMessage(message)
+	end)
+
+	WEP.Comm:RegisterHandler(MSG_SEEKER_SPOT, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
+		self:OnSeekerSpotMessage(message)
+	end)
+
+	WEP.Comm:RegisterHandler(MSG_TAGGED, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
+		self:OnTaggedMessage(message)
+	end)
+
+	WEP.Comm:RegisterHandler(MSG_SAFE, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
+		self:OnSafeMessage(message)
+	end)
+
 	self.frame = CreateFrame("Frame")
 	self.frame:RegisterEvent("PLAYER_TARGET_CHANGED")
 	self.frame:SetScript("OnEvent", function(_, event)
@@ -386,7 +465,9 @@ function HideSeek:CreateLobby()
 	self.seekEndsAt = nil
 	self.hideEndsAt = nil
 	self.resultReason = nil
+	self.nextSeeker = nil
 	self.starRevealUsesRemaining = 0
+	self:ClearStartSpot()
 	self:CancelStarReveal()
 	self:ResetRoster()
 	self:AddPlayer(Player.GetFullName(), false)
@@ -399,7 +480,7 @@ function HideSeek:CreateLobby()
 end
 
 function HideSeek:EnsureHostLobby()
-	if not self.gameId or self.status == STATUS_IDLE or self.status == STATUS_ENDED then
+	if not self.gameId or self.status == STATUS_IDLE then
 		self:CreateLobby()
 	end
 
@@ -423,12 +504,19 @@ function HideSeek:EnsureHostLobby()
 
 	if self.status == STATUS_ENDED then
 		self.status = STATUS_LOBBY
-		self.seeker = nil
+		if self.nextSeeker and self:GetPlayer(self.nextSeeker) then
+			self.seeker = self.nextSeeker
+		else
+			self.seeker = nil
+		end
 		self.starRevealUsesRemaining = 0
+		self:ClearStartSpot()
 		self:CancelStarReveal()
 		self:ClearFound()
+		self.nextSeeker = nil
 		WEP:Log("HideSeek", "ended_game_reopened", {
 			gameId = self.gameId,
+			nextSeeker = self.seeker or "random",
 		})
 	end
 
@@ -467,7 +555,7 @@ function HideSeek:IsBusy()
 	return self.gameId ~= nil and self.status ~= STATUS_IDLE and self.status ~= STATUS_ENDED
 end
 
-function HideSeek:AddPlayer(name, found)
+function HideSeek:AddPlayer(name, found, safe, pendingFound)
 	if isBlank(name) then
 		return nil
 	end
@@ -483,6 +571,8 @@ function HideSeek:AddPlayer(name, found)
 		player = {
 			name = name,
 			found = found == true,
+			safe = safe == true,
+			pendingFound = pendingFound == true,
 		}
 		self.players[key] = player
 		self.playerOrder[#self.playerOrder + 1] = key
@@ -490,10 +580,14 @@ function HideSeek:AddPlayer(name, found)
 			gameId = self.gameId or "none",
 			player = name,
 			found = found == true,
+			safe = safe == true,
+			pendingFound = pendingFound == true,
 		})
 	else
 		player.name = name
 		player.found = player.found or found == true
+		player.safe = player.safe or safe == true
+		player.pendingFound = player.pendingFound or pendingFound == true
 	end
 
 	return player
@@ -533,6 +627,8 @@ end
 function HideSeek:ClearFound()
 	for _, player in pairs(self.players) do
 		player.found = false
+		player.safe = false
+		player.pendingFound = false
 	end
 end
 
@@ -580,6 +676,20 @@ function HideSeek:GetFoundCount()
 	return count
 end
 
+function HideSeek:GetSafeCount()
+	local count = 0
+
+	for _, key in ipairs(self.playerOrder) do
+		local player = self.players[key]
+
+		if player and player.safe and not namesMatch(player.name, self.seeker) then
+			count = count + 1
+		end
+	end
+
+	return count
+end
+
 function HideSeek:GetStarRevealRemaining()
 	local maxUses = clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0)
 	local remaining = tonumber(self.starRevealUsesRemaining) or 0
@@ -612,6 +722,388 @@ end
 function HideSeek:ResetStarRevealUses()
 	self.starRevealUses = clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0)
 	self.starRevealUsesRemaining = self.starRevealUses
+end
+
+function HideSeek:GetStartRadius()
+	self.startRadius = clamp(self.startRadius or self.areaRadius, MIN_START_RADIUS, MAX_START_RADIUS, 1)
+	return self.startRadius
+end
+
+function HideSeek:HasStartSpot()
+	return self.startMapId ~= nil and self.startX ~= nil and self.startY ~= nil
+end
+
+function HideSeek:AddStartSpotPayload(payload, includeSpot)
+	payload.ar = self:GetStartRadius()
+
+	if includeSpot and self:HasStartSpot() then
+		payload.am = self.startMapId
+		payload.ax = self.startX
+		payload.ay = self.startY
+	end
+
+	return payload
+end
+
+function HideSeek:ApplyStartSpotPayload(payload, clearMissingSpot)
+	payload = payload or {}
+	self.startRadius = clamp(payload.ar, MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
+
+	local mapId = tonumber(payload.am)
+	local x = tonumber(payload.ax)
+	local y = tonumber(payload.ay)
+
+	if mapId and x and y then
+		self.startMapId = mapId
+		self.startX = x
+		self.startY = y
+	elseif clearMissingSpot then
+		self.startMapId = nil
+		self.startX = nil
+		self.startY = nil
+	end
+end
+
+function HideSeek:ClearStartSpot()
+	self.startMapId = nil
+	self.startX = nil
+	self.startY = nil
+	self.startSpotPending = false
+	self.seekerAtStartSpot = nil
+	self.seekerSpotUpdatedAt = nil
+	self.seekerAbsentSince = nil
+	self.startLocationUnavailableWarned = false
+	self:CancelSafeAttempt()
+	self:HideHomeStatus()
+end
+
+function HideSeek:CaptureStartSpot()
+	if not Environment or not Environment.GetPlayerMapPosition then
+		WEP:Log("HideSeek", "start_spot_capture_failed", {
+			error = "map position API unavailable",
+		}, "error")
+		WEP:Print("Could not start Hide and Seek: map coordinates are unavailable.")
+		return false
+	end
+
+	local mapId, x, y = Environment.GetPlayerMapPosition()
+	if not mapId or not x or not y then
+		WEP:Log("HideSeek", "start_spot_capture_failed", {
+			mapId = mapId or "none",
+			x = x or "none",
+			y = y or "none",
+		}, "warn")
+		WEP:Print("Could not start Hide and Seek: the seeker's current map coordinates are unavailable.")
+		return false
+	end
+
+	self.startMapId = tonumber(mapId)
+	self.startX = tonumber(x)
+	self.startY = tonumber(y)
+	self.seekerAtStartSpot = true
+	self.seekerSpotUpdatedAt = Timer.Now()
+	self.seekerAbsentSince = nil
+	self.startLocationUnavailableWarned = false
+	self:HideHomeStatus()
+
+	WEP:Log("HideSeek", "start_spot_captured", {
+		gameId = self.gameId or "none",
+		mapId = self.startMapId,
+		x = self.startX,
+		y = self.startY,
+		radius = self:GetStartRadius(),
+	})
+	return true
+end
+
+function HideSeek:GetStartSpotDetailText()
+	local text = "Start radius " .. self:GetStartRadius()
+
+	if self:HasStartSpot() then
+		text = text .. " @ " .. self.startX .. ", " .. self.startY
+	end
+
+	return text
+end
+
+function HideSeek:GetCurrentMapPosition()
+	if Environment and Environment.GetPlayerMapPosition then
+		local mapId, x, y = Environment.GetPlayerMapPosition()
+		return tonumber(mapId), tonumber(x), tonumber(y)
+	end
+
+	if Environment and Environment.GetLocation then
+		local location = Environment.GetLocation()
+		if location then
+			return tonumber(location.mapId), tonumber(location.x), tonumber(location.y)
+		end
+	end
+
+	return nil, nil, nil
+end
+
+function HideSeek:GetStartSpotDistance()
+	if not self:HasStartSpot() then
+		return nil, "no start spot"
+	end
+
+	local mapId, x, y = self:GetCurrentMapPosition()
+	if not mapId then
+		return nil, "map unavailable"
+	end
+
+	if mapId ~= tonumber(self.startMapId) then
+		return nil, "wrong map", true
+	end
+
+	if not x or not y then
+		return nil, "coordinates unavailable"
+	end
+
+	local dx = x - self.startX
+	local dy = y - self.startY
+	return math.sqrt((dx * dx) + (dy * dy))
+end
+
+function HideSeek:IsAtStartSpot()
+	local distance, reason, wrongMap = self:GetStartSpotDistance()
+
+	if wrongMap then
+		return false, reason
+	end
+
+	if not distance then
+		return nil, reason
+	end
+
+	return distance <= self:GetStartRadius(), distance
+end
+
+function HideSeek:ShowHomeStatus(text)
+	local frame = ensureHomeStatusFrame()
+	if not frame then
+		WEP:Log("HideSeek", "home_status_unavailable", nil, "warn")
+		return false
+	end
+
+	frame.text:SetText(text)
+	frame:Show()
+	return true
+end
+
+function HideSeek:HideHomeStatus()
+	if homeStatusFrame then
+		homeStatusFrame:Hide()
+	end
+end
+
+function HideSeek:IsActiveHider(player)
+	return player
+		and not namesMatch(player.name, self.seeker)
+		and player.found ~= true
+		and player.safe ~= true
+end
+
+function HideSeek:ShouldMonitorHomeSpot()
+	if not self:HasStartSpot() or not self:IsParticipant() or self.status ~= STATUS_SEEKING then
+		return false
+	end
+
+	if self:IsSeeker() then
+		return true
+	end
+
+	return self:IsActiveHider(self:GetPlayer(Player.GetFullName()))
+end
+
+function HideSeek:StartHomeMonitor()
+	self.homeMonitorToken = (self.homeMonitorToken or 0) + 1
+	local token = self.homeMonitorToken
+
+	local function check()
+		if self.homeMonitorToken ~= token then
+			return
+		end
+
+		if not self:ShouldMonitorHomeSpot() then
+			self:CancelSafeAttempt()
+			return
+		end
+
+		self:CheckHomeSpot()
+
+		if self.homeMonitorToken == token and self:ShouldMonitorHomeSpot() then
+			Timer.After(HOME_CHECK_INTERVAL_SECONDS, check)
+		end
+	end
+
+	check()
+end
+
+function HideSeek:StopHomeMonitor()
+	self.homeMonitorToken = (self.homeMonitorToken or 0) + 1
+	self.startLocationUnavailableWarned = false
+	self:CancelSafeAttempt()
+end
+
+function HideSeek:CheckHomeSpot()
+	local atStart, reasonOrDistance = self:IsAtStartSpot()
+
+	if atStart == nil then
+		self:CancelSafeAttempt()
+
+		if not self.startLocationUnavailableWarned then
+			self.startLocationUnavailableWarned = true
+			WEP:Log("HideSeek", "start_spot_check_waiting", {
+				gameId = self.gameId or "none",
+				reason = reasonOrDistance or "unknown",
+			}, "warn")
+			WEP:Print("Hide and Seek start spot check is waiting for map coordinates.")
+		end
+
+		return
+	end
+
+	self.startLocationUnavailableWarned = false
+
+	if self:IsSeeker() then
+		self:ReportSeekerSpot(atStart)
+
+		if atStart and self:IsHost() then
+			self:ConfirmPendingFoundAtStart()
+		end
+
+		return
+	end
+
+	if atStart then
+		self:StartSafeAttempt()
+	else
+		self:CancelSafeAttempt()
+	end
+end
+
+function HideSeek:CancelSafeAttempt()
+	self.safeAttemptToken = (self.safeAttemptToken or 0) + 1
+	self.safeAttemptActive = false
+	self.safeAttemptStartedAt = nil
+	self:HideHomeStatus()
+end
+
+function HideSeek:StartSafeAttempt()
+	if self.safeAttemptActive then
+		return
+	end
+
+	self.safeAttemptActive = true
+	self.safeAttemptStartedAt = Timer.Now()
+	self.safeAttemptToken = (self.safeAttemptToken or 0) + 1
+	local token = self.safeAttemptToken
+
+	self:ShowHomeStatus("Hold the start spot\n" .. SAFE_CONFIRM_SECONDS)
+
+	Timer.After(SAFE_CONFIRM_SECONDS, function()
+		if self.safeAttemptToken ~= token then
+			return
+		end
+
+		self.safeAttemptActive = false
+		self.safeAttemptStartedAt = nil
+		self:HideHomeStatus()
+
+		if self.status ~= STATUS_SEEKING or self:IsSeeker() then
+			return
+		end
+
+		local player = self:GetPlayer(Player.GetFullName())
+		if not self:IsActiveHider(player) then
+			return
+		end
+
+		local atStart = self:IsAtStartSpot()
+		if atStart == true then
+			self:RequestSafe()
+		end
+	end)
+end
+
+function HideSeek:RequestSafe()
+	local playerName = Player.GetFullName()
+
+	if self:IsHost() then
+		return self:ProcessSafeRequest(playerName, playerName)
+	end
+
+	return self:Broadcast(MSG_SAFE, {
+		g = self.gameId,
+		p = playerName,
+	})
+end
+
+function HideSeek:UpdateSeekerSpotState(atStart, observedAt)
+	local now = tonumber(observedAt) or Timer.Now()
+	atStart = atStart == true
+
+	if atStart then
+		self.seekerAbsentSince = nil
+	else
+		if self.seekerAtStartSpot ~= false or not self.seekerAbsentSince then
+			self.seekerAbsentSince = now
+		end
+	end
+
+	self.seekerAtStartSpot = atStart
+	self.seekerSpotUpdatedAt = now
+end
+
+function HideSeek:ReportSeekerSpot(atStart)
+	if self.status ~= STATUS_SEEKING or not self:IsSeeker() then
+		return false
+	end
+
+	local now = Timer.Now()
+
+	if self:IsHost() then
+		self:UpdateSeekerSpotState(atStart, now)
+		return true
+	end
+
+	return self:Broadcast(MSG_SEEKER_SPOT, {
+		g = self.gameId,
+		at = atStart and 1 or 0,
+		t = now,
+	})
+end
+
+function HideSeek:IsSeekerSpotFresh(now)
+	now = tonumber(now) or Timer.Now()
+	return self.seekerSpotUpdatedAt ~= nil and now - self.seekerSpotUpdatedAt <= SEEKER_SPOT_STALE_SECONDS
+end
+
+function HideSeek:IsSeekerAbsentForSafe(now)
+	now = tonumber(now) or Timer.Now()
+
+	return self.status == STATUS_SEEKING
+		and self.seekerAtStartSpot == false
+		and self:IsSeekerSpotFresh(now)
+		and self.seekerAbsentSince ~= nil
+		and now - self.seekerAbsentSince >= SAFE_CONFIRM_SECONDS
+end
+
+function HideSeek:ConfirmPendingFoundAtStart()
+	if not self:IsHost() or self.status ~= STATUS_SEEKING then
+		return false
+	end
+
+	for _, key in ipairs(self.playerOrder) do
+		local player = self.players[key]
+
+		if self:IsActiveHider(player) and player.pendingFound then
+			return self:MarkFound(player.name, self.seeker or Player.GetFullName(), true)
+		end
+	end
+
+	return false
 end
 
 function HideSeek:SetRaidTargetIcon(unit, icon)
@@ -756,7 +1248,7 @@ function HideSeek:UseStarRevealPower()
 	for _, key in ipairs(self.playerOrder) do
 		local player = self.players[key]
 
-		if player and not player.found and not namesMatch(player.name, self.seeker) then
+		if self:IsActiveHider(player) then
 			hiderCount = hiderCount + 1
 			local unit = self:FindUnitTokenForPlayer(player.name, usedUnits)
 
@@ -875,7 +1367,7 @@ function HideSeek:SetSelectedSeeker(name, broadcast)
 	return true
 end
 
-function HideSeek:AllHidersFound()
+function HideSeek:AllHidersSafe()
 	local hiderCount = 0
 
 	for _, key in ipairs(self.playerOrder) do
@@ -884,7 +1376,7 @@ function HideSeek:AllHidersFound()
 		if player and not namesMatch(player.name, self.seeker) then
 			hiderCount = hiderCount + 1
 
-			if not player.found then
+			if not player.safe then
 				return false
 			end
 		end
@@ -906,6 +1398,10 @@ function HideSeek:GetRosterText()
 				suffix = " (seeker)"
 			elseif player.found then
 				suffix = " (found)"
+			elseif player.safe then
+				suffix = " (safe)"
+			elseif player.pendingFound then
+				suffix = " (tagged)"
 			end
 
 			values[#values + 1] = player.name .. suffix
@@ -925,6 +1421,7 @@ function HideSeek:GetSummary()
 		"Host: " .. (self.host or "none"),
 		"Players: " .. self:GetPlayerCount(),
 		"Hide: " .. formatDuration(self.hideSeconds) .. ", Seek: " .. formatDuration(self.seekSeconds),
+		self:GetStartSpotDetailText(),
 		"Star reveal: " .. self:GetStarRevealText(),
 	}
 
@@ -935,6 +1432,7 @@ function HideSeek:GetSummary()
 	lines[#lines + 1] = "Roster: " .. self:GetRosterText()
 
 	if self.status == STATUS_SEEKING then
+		lines[#lines + 1] = "Safe: " .. self:GetSafeCount() .. "/" .. self:GetHiderCount()
 		lines[#lines + 1] = "Found: " .. self:GetFoundCount() .. "/" .. self:GetHiderCount()
 	end
 
@@ -969,6 +1467,10 @@ end
 
 function HideSeek:CanHostControl()
 	if self.status ~= STATUS_IDLE and self.status ~= STATUS_LOBBY and self.status ~= STATUS_ENDED then
+		return false
+	end
+
+	if self.startSpotPending then
 		return false
 	end
 
@@ -1022,6 +1524,14 @@ function HideSeek:GetPlayerStateText(player)
 		return "Found"
 	end
 
+	if player.safe then
+		return "Safe"
+	end
+
+	if player.pendingFound then
+		return "Tagged"
+	end
+
 	if self.status == STATUS_HIDING then
 		return "Hiding"
 	end
@@ -1061,6 +1571,20 @@ function HideSeek:GetRosterItems()
 					b = 0.12,
 					a = 0.35,
 				}
+			elseif player.safe then
+				color = {
+					r = 0.02,
+					g = 0.18,
+					b = 0.08,
+					a = 0.35,
+				}
+			elseif player.pendingFound then
+				color = {
+					r = 0.20,
+					g = 0.14,
+					b = 0.02,
+					a = 0.35,
+				}
 			elseif isSelfName(player.name) then
 				color = {
 					r = 0.02,
@@ -1098,6 +1622,7 @@ function HideSeek:GetGameDetailText()
 		"Players " .. self:GetPlayerCount(),
 		"Hide " .. formatDuration(self.hideSeconds),
 		"Seek " .. formatDuration(self.seekSeconds),
+		self:GetStartSpotDetailText(),
 	}
 
 	if clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0) > 0 then
@@ -1111,6 +1636,7 @@ function HideSeek:GetGameDetailText()
 	end
 
 	if self.status == STATUS_SEEKING then
+		details[#details + 1] = "Safe " .. self:GetSafeCount() .. "/" .. self:GetHiderCount()
 		details[#details + 1] = "Found " .. self:GetFoundCount() .. "/" .. self:GetHiderCount()
 	end
 
@@ -1118,6 +1644,10 @@ function HideSeek:GetGameDetailText()
 end
 
 function HideSeek:GetTimerText()
+	if self.startSpotPending then
+		return "Waiting for seeker starting spot"
+	end
+
 	local hideRemaining = self:GetRemainingHideSeconds()
 	if hideRemaining then
 		return "Seeker released in " .. formatDuration(hideRemaining)
@@ -1131,6 +1661,10 @@ function HideSeek:GetTimerText()
 	if self.status == STATUS_ENDED and self.resultReason then
 		if self.resultReason == "found" then
 			return "Result: seeker wins"
+		end
+
+		if self.resultReason == "safe" then
+			return "Result: hiders safe"
 		end
 
 		if self.resultReason == "time" then
@@ -1228,7 +1762,7 @@ function HideSeek:GetTrackerNames()
 
 			if self.seeker and namesMatch(player.name, self.seeker) then
 				seeker = name
-			elseif rolesAssigned and not player.found then
+			elseif rolesAssigned and self:IsActiveHider(player) then
 				hiders[#hiders + 1] = name
 			end
 		end
@@ -1624,6 +2158,13 @@ function HideSeek:EnsureWindow()
 	})
 	window.starRevealInput:SetPoint("TOPLEFT", window.seekInput, "TOPRIGHT", 12, 0)
 
+	window.startRadiusInput = Form.CreateInput(content, {
+		label = "Start radius",
+		width = 96,
+		numeric = true,
+	})
+	window.startRadiusInput:SetPoint("TOPLEFT", window.starRevealInput, "TOPRIGHT", 12, 0)
+
 	window.applyButton = Form.CreateButton(content, {
 		text = "Apply",
 		width = 78,
@@ -1631,7 +2172,7 @@ function HideSeek:EnsureWindow()
 			self:ApplyWindowSettings()
 		end,
 	})
-	window.applyButton:SetPoint("LEFT", window.starRevealInput.editBox, "RIGHT", 12, 0)
+	window.applyButton:SetPoint("LEFT", window.startRadiusInput.editBox, "RIGHT", 12, 0)
 
 	window.seekerInput = Form.CreateInput(content, {
 		label = "Seeker",
@@ -1756,12 +2297,14 @@ function HideSeek:RefreshWindow()
 	setInputValueIfNotFocused(window.hideInput, self.hideSeconds)
 	setInputValueIfNotFocused(window.seekInput, self.seekSeconds)
 	setInputValueIfNotFocused(window.starRevealInput, self.starRevealUses)
+	setInputValueIfNotFocused(window.startRadiusInput, self:GetStartRadius())
 	setInputValueIfNotFocused(window.seekerInput, self:GetSelectedSeeker() or "")
 
 	setInputEnabled(window.inviteInput, canHostControl)
 	setInputEnabled(window.hideInput, canHostControl)
 	setInputEnabled(window.seekInput, canHostControl)
 	setInputEnabled(window.starRevealInput, canHostControl)
+	setInputEnabled(window.startRadiusInput, canHostControl)
 	setInputEnabled(window.seekerInput, canHostControl)
 	setButtonEnabled(window.inviteButton, canHostControl)
 	setButtonEnabled(window.applyButton, canHostControl)
@@ -1880,6 +2423,7 @@ function HideSeek:ReadWindowSettings()
 	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self.starRevealUses = clamp(window.starRevealInput:GetValue(), MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
+	self.startRadius = clamp(window.startRadiusInput:GetValue(), MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
 
 	if not self:ReadWindowSeeker() then
 		return false
@@ -1889,6 +2433,7 @@ function HideSeek:ReadWindowSettings()
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
 		starRevealUses = self.starRevealUses,
+		startRadius = self.startRadius,
 		seeker = self.seeker or "random",
 	})
 	return true
@@ -1910,12 +2455,13 @@ function HideSeek:ApplyWindowSettings()
 		return
 	end
 
-	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "star reveals", self.starRevealUses, "seeker", self.seeker or "random")
+	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "start", self:GetStartRadius(), "star reveals", self.starRevealUses, "seeker", self.seeker or "random")
 	WEP:Log("HideSeek", "settings_applied", {
 		gameId = self.gameId or "none",
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
 		starRevealUses = self.starRevealUses,
+		startRadius = self.startRadius,
 		seeker = self.seeker or "random",
 	})
 	self:BroadcastState()
@@ -1997,6 +2543,7 @@ function HideSeek:InvitePlayer(target)
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
 		ru = self.starRevealUses,
+		ar = self:GetStartRadius(),
 	})
 
 	if not ok then
@@ -2026,6 +2573,7 @@ function HideSeek:OnInviteRequest(request)
 	local hideSeconds = clamp(data.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	local seekSeconds = clamp(data.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	local starRevealUses = clamp(data.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
+	local startRadius = clamp(data.ar, MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
 
 	if isBlank(data.g) then
 		WEP:Log("HideSeek", "invite_request_ignored", {
@@ -2060,6 +2608,8 @@ function HideSeek:OnInviteRequest(request)
 		.. formatDuration(hideSeconds)
 		.. ", Seek: "
 		.. formatDuration(seekSeconds)
+		.. ", Start radius: "
+		.. startRadius
 
 	if starRevealUses > 0 then
 		message = message .. ", Star reveals: " .. starRevealUses
@@ -2116,6 +2666,7 @@ function HideSeek:OnInviteRequest(request)
 				self.hideSeconds = hideSeconds
 				self.seekSeconds = seekSeconds
 				self.starRevealUses = starRevealUses
+				self.startRadius = startRadius
 				self.status = STATUS_LOBBY
 				self.seeker = nil
 				self:ResetRoster()
@@ -2216,7 +2767,7 @@ function HideSeek:BroadcastState()
 		return false
 	end
 
-	local ok, messageIdOrErr = self:Broadcast(MSG_STATE, {
+	local ok, messageIdOrErr = self:Broadcast(MSG_STATE, self:AddStartSpotPayload({
 		g = self.gameId,
 		h = self.host or "",
 		st = self.status or STATUS_IDLE,
@@ -2224,7 +2775,8 @@ function HideSeek:BroadcastState()
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
 		ru = self.starRevealUses,
-	})
+		ns = self.nextSeeker or "",
+	}, false))
 
 	if ok then
 		self:BroadcastRoster()
@@ -2250,6 +2802,8 @@ function HideSeek:BroadcastRoster()
 				g = self.gameId,
 				p = player.name,
 				f = player.found and 1 or 0,
+				s = player.safe and 1 or 0,
+				t = player.pendingFound and 1 or 0,
 				c = first and 1 or 0,
 			})
 
@@ -2299,6 +2853,8 @@ function HideSeek:OnStateMessage(message)
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self.starRevealUses = clamp(payload.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
+	self.nextSeeker = not isBlank(payload.ns) and payload.ns or nil
+	self:ApplyStartSpotPayload(payload, self.status == STATUS_LOBBY or self.status == STATUS_IDLE or self.status == STATUS_ENDED)
 	self:ResetRoster()
 	self:RefreshWindow()
 	WEP:Log("HideSeek", "state_message_applied", {
@@ -2306,6 +2862,7 @@ function HideSeek:OnStateMessage(message)
 		status = self.status,
 		host = self.host,
 		starRevealUses = self.starRevealUses,
+		startRadius = self.startRadius,
 	})
 end
 
@@ -2326,7 +2883,7 @@ function HideSeek:OnRosterMessage(message)
 	end
 
 	if not isBlank(payload.p) then
-		self:AddPlayer(payload.p, tostring(payload.f or "") == "1")
+		self:AddPlayer(payload.p, tostring(payload.f or "") == "1", tostring(payload.s or "") == "1", tostring(payload.t or "") == "1")
 	end
 
 	self:RefreshWindow()
@@ -2335,6 +2892,82 @@ function HideSeek:OnRosterMessage(message)
 		player = payload.p or "none",
 		count = self:GetPlayerCount(),
 	})
+end
+
+function HideSeek:OnStartSpotRequestMessage(message)
+	local payload = message.payload or {}
+
+	if payload.g ~= self.gameId or not self:IsMessageFromHost(message, payload.h or self.host) then
+		WEP:Log("HideSeek", "start_spot_request_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or host mismatch",
+		}, "warn")
+		return
+	end
+
+	if isBlank(payload.sk) or not isSelfName(payload.sk) then
+		return
+	end
+
+	self.seeker = payload.sk
+	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
+	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	self.starRevealUses = clamp(payload.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
+	self.startRadius = clamp(payload.ar, MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
+
+	if not self:CaptureStartSpot() then
+		return
+	end
+
+	self:Broadcast(MSG_START_SPOT, self:AddStartSpotPayload({
+		g = self.gameId,
+		t = Timer.Now(),
+	}, true))
+	WEP:Print("Hide and Seek starting spot set.")
+	self:RefreshWindow()
+end
+
+function HideSeek:OnStartSpotMessage(message)
+	local payload = message.payload or {}
+
+	if not self:IsHost() then
+		return
+	end
+
+	if payload.g ~= self.gameId or not self:IsMessageFromSeeker(message) then
+		WEP:Log("HideSeek", "start_spot_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or seeker mismatch",
+		}, "warn")
+		return
+	end
+
+	if self.status ~= STATUS_LOBBY or not self.startSpotPending then
+		WEP:Log("HideSeek", "start_spot_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			status = self.status or "none",
+			reason = "not waiting",
+		}, "warn")
+		return
+	end
+
+	self:ApplyStartSpotPayload(payload, true)
+	if not self:HasStartSpot() then
+		WEP:Log("HideSeek", "start_spot_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "missing coordinates",
+		}, "warn")
+		WEP:Print("Hide and Seek start canceled: seeker did not send usable coordinates.")
+		self.startSpotPending = false
+		self:RefreshWindow()
+		return
+	end
+
+	self:StartGameWithStartSpot(tonumber(payload.t) or Timer.Now())
 end
 
 function HideSeek:PickRandomSeeker()
@@ -2362,6 +2995,87 @@ function HideSeek:PickRandomSeeker()
 	return nil
 end
 
+function HideSeek:StartGameWithStartSpot(startedAt)
+	if not self:HasStartSpot() then
+		WEP:Log("HideSeek", "start_failed", {
+			gameId = self.gameId or "none",
+			error = "missing start spot",
+		}, "error")
+		WEP:Print("Could not start Hide and Seek: missing starting spot.")
+		self:ShowMenu()
+		return false
+	end
+
+	startedAt = tonumber(startedAt) or Timer.Now()
+	self.startSpotPending = false
+	self.nextSeeker = nil
+	self:ClearFound()
+	WEP:Log("HideSeek", "started", {
+		gameId = self.gameId,
+		seeker = self.seeker or "none",
+		hideSeconds = self.hideSeconds,
+		seekSeconds = self.seekSeconds,
+		starRevealUses = self.starRevealUses,
+		startRadius = self.startRadius,
+		startMapId = self.startMapId,
+	})
+	self:BeginHiding(self.hideSeconds, self.seekSeconds, startedAt)
+	self:BroadcastState()
+	self:Broadcast(MSG_START, self:AddStartSpotPayload({
+		g = self.gameId,
+		sk = self.seeker,
+		hs = self.hideSeconds,
+		ss = self.seekSeconds,
+		ru = self.starRevealUses,
+		t = startedAt,
+	}, true))
+
+	if gameWindow then
+		gameWindow:Hide()
+	end
+
+	return true
+end
+
+function HideSeek:RequestStartSpotFromSeeker(seeker)
+	self.startSpotPending = true
+	self.startSpotRequestToken = (self.startSpotRequestToken or 0) + 1
+	local token = self.startSpotRequestToken
+
+	local ok = self:Broadcast(MSG_START_SPOT_REQUEST, self:AddStartSpotPayload({
+		g = self.gameId,
+		h = self.host or Player.GetFullName(),
+		sk = seeker,
+		hs = self.hideSeconds,
+		ss = self.seekSeconds,
+		ru = self.starRevealUses,
+	}, false))
+
+	if not ok then
+		self.startSpotPending = false
+		self:RefreshWindow()
+		return false
+	end
+
+	WEP:Print("Waiting for", seeker, "to set the Hide and Seek starting spot.")
+	self:BroadcastState()
+	self:RefreshWindow()
+
+	Timer.After(START_SPOT_RESPONSE_TIMEOUT_SECONDS, function()
+		if self.startSpotRequestToken == token and self.startSpotPending and self.status == STATUS_LOBBY then
+			self.startSpotPending = false
+			WEP:Log("HideSeek", "start_spot_request_timed_out", {
+				gameId = self.gameId or "none",
+				seeker = seeker or "none",
+			}, "warn")
+			WEP:Print("Hide and Seek start canceled: seeker did not send a starting spot.")
+			self:RefreshWindow()
+		end
+	end)
+
+	return true
+end
+
 function HideSeek:StartGame()
 	WEP:Log("HideSeek", "start_requested", {
 		gameId = self.gameId or "none",
@@ -2370,6 +3084,12 @@ function HideSeek:StartGame()
 	})
 
 	if not self:EnsureHostLobby() then
+		return
+	end
+
+	if self.startSpotPending then
+		WEP:Print("Hide and Seek is waiting for the seeker to set the starting spot.")
+		self:RefreshWindow()
 		return
 	end
 
@@ -2400,28 +3120,21 @@ function HideSeek:StartGame()
 	end
 
 	self.seeker = seeker
+	self.nextSeeker = nil
 	self:ClearFound()
-	WEP:Log("HideSeek", "started", {
-		gameId = self.gameId,
-		seeker = seeker,
-		hideSeconds = self.hideSeconds,
-		seekSeconds = self.seekSeconds,
-		starRevealUses = self.starRevealUses,
-	})
-	self:BeginHiding(self.hideSeconds, self.seekSeconds, Timer.Now())
-	self:BroadcastState()
-	self:Broadcast(MSG_START, {
-		g = self.gameId,
-		sk = seeker,
-		hs = self.hideSeconds,
-		ss = self.seekSeconds,
-		ru = self.starRevealUses,
-		t = Timer.Now(),
-	})
 
-	if gameWindow then
-		gameWindow:Hide()
+	if self:IsSeeker() then
+		if not self:CaptureStartSpot() then
+			self:ShowMenu()
+			return
+		end
+
+		self:StartGameWithStartSpot(Timer.Now())
+		return
 	end
+
+	self:ClearStartSpot()
+	self:RequestStartSpotFromSeeker(seeker)
 end
 
 function HideSeek:OnStartMessage(message)
@@ -2440,11 +3153,25 @@ function HideSeek:OnStartMessage(message)
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self.starRevealUses = clamp(payload.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
+	self.nextSeeker = nil
+	self:ApplyStartSpotPayload(payload, true)
+	if not self:HasStartSpot() then
+		WEP:Log("HideSeek", "start_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "missing start spot",
+		}, "warn")
+		WEP:Print("Hide and Seek start ignored: missing starting spot.")
+		return
+	end
+
 	self:ClearFound()
 	WEP:Log("HideSeek", "start_message_applied", {
 		gameId = self.gameId,
 		seeker = self.seeker or "none",
 		starRevealUses = self.starRevealUses,
+		startRadius = self.startRadius,
+		startMapId = self.startMapId or "none",
 	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, tonumber(payload.t) or Timer.Now())
 end
@@ -2458,6 +3185,7 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 	self:ResetStarRevealUses()
 	self:CancelStarReveal()
 	self:ClearAllRaidTargets()
+	self.startLocationUnavailableWarned = false
 	self.timerToken = (self.timerToken or 0) + 1
 	local token = self.timerToken
 	local remaining = self.hideEndsAt - Timer.Now()
@@ -2472,6 +3200,8 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 		hideSeconds = hideSeconds,
 		seekSeconds = seekSeconds,
 		starRevealUses = self.starRevealUses,
+		startRadius = self.startRadius,
+		startMapId = self.startMapId or "none",
 		remaining = remaining,
 	})
 
@@ -2505,6 +3235,9 @@ function HideSeek:BeginSeeking()
 	self.status = STATUS_SEEKING
 	self.seekEndsAt = Timer.Now() + self.seekSeconds
 	self.hideEndsAt = nil
+	self.seekerAtStartSpot = nil
+	self.seekerSpotUpdatedAt = nil
+	self.seekerAbsentSince = nil
 	self.timerToken = (self.timerToken or 0) + 1
 	local token = self.timerToken
 
@@ -2518,9 +3251,9 @@ function HideSeek:BeginSeeking()
 	if self:IsSeeker() then
 		ScreenOverlay.HideBlackout()
 		self:HideSeekerUI()
-		WEP:Print("Find the hiders. Target them to mark them found.")
+		WEP:Print("Find a hider, target them, then return to the starting spot.")
 	else
-		WEP:Print("The seeker is hunting.")
+		WEP:Print("The seeker is hunting. Reach the starting spot while the seeker is away.")
 	end
 
 	Timer.After(self.seekSeconds, function()
@@ -2529,6 +3262,7 @@ function HideSeek:BeginSeeking()
 		end
 	end)
 
+	self:StartHomeMonitor()
 	self:RefreshWindow()
 end
 
@@ -2651,20 +3385,87 @@ function HideSeek:OnTargetChanged()
 	})
 
 	local player = self:GetPlayer(targetName)
-	if not player or player.found or namesMatch(player.name, self.seeker) then
+	if not self:IsActiveHider(player) then
 		return
 	end
 
-	self:MarkFound(player.name, Player.GetFullName(), true)
+	self:TagPlayer(player.name, true)
+end
+
+function HideSeek:MarkTagged(playerName)
+	local player = self:GetPlayer(playerName)
+	if not self:IsActiveHider(player) then
+		return nil
+	end
+
+	local wasPending = player.pendingFound == true
+	player.pendingFound = true
+
+	if not wasPending then
+		WEP:Print(player.name, "was tagged. The seeker must return to the starting spot.")
+		playSound("ui_select")
+	end
+
+	WEP:Log("HideSeek", "player_tagged", {
+		gameId = self.gameId or "none",
+		player = player.name,
+	})
+	self:RefreshWindow()
+	return player
+end
+
+function HideSeek:TagPlayer(playerName, broadcast)
+	local player = self:MarkTagged(playerName)
+	if not player then
+		return false
+	end
+
+	if broadcast then
+		self:Broadcast(MSG_TAGGED, {
+			g = self.gameId,
+			p = player.name,
+		})
+	end
+
+	if self:IsHost() then
+		self:BroadcastState()
+	end
+
+	return true
+end
+
+function HideSeek:OnTaggedMessage(message)
+	local payload = message.payload or {}
+
+	if payload.g ~= self.gameId or self.status ~= STATUS_SEEKING or not self:IsMessageFromSeeker(message) then
+		WEP:Log("HideSeek", "tagged_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "state or seeker mismatch",
+		}, "warn")
+		return
+	end
+
+	WEP:Log("HideSeek", "tagged_message_received", {
+		sender = message.sender,
+		player = payload.p or "none",
+		gameId = self.gameId,
+	})
+	if self:MarkTagged(payload.p) and self:IsHost() then
+		self:BroadcastState()
+	end
 end
 
 function HideSeek:MarkFound(playerName, foundBy, broadcast)
 	local player = self:GetPlayer(playerName)
-	if not player or player.found then
+	if not self:IsActiveHider(player) then
 		return false
 	end
 
 	player.found = true
+	player.safe = false
+	player.pendingFound = false
+	self.nextSeeker = player.name
 	WEP:Print(player.name, "was found by", foundBy or self.seeker or "the seeker")
 	playSound("ui_select")
 	WEP:Log("HideSeek", "player_found", {
@@ -2672,32 +3473,35 @@ function HideSeek:MarkFound(playerName, foundBy, broadcast)
 		player = player.name,
 		foundBy = foundBy or self.seeker or "unknown",
 		broadcast = broadcast == true,
+		nextSeeker = self.nextSeeker,
 	})
 
 	if broadcast then
 		self:Broadcast(MSG_FOUND, {
 			g = self.gameId,
 			p = player.name,
-			by = foundBy or Player.GetFullName(),
+			by = foundBy or self.seeker or Player.GetFullName(),
+			ns = self.nextSeeker,
 		})
 	end
 
-	if self:IsHost() and self:AllHidersFound() then
-		self:FinishGame("found", true)
+	self:RefreshWindow()
+
+	if self:IsHost() and self.status ~= STATUS_ENDED then
+		self:FinishGame("found", true, player.name)
 	end
 
-	self:RefreshWindow()
 	return true
 end
 
 function HideSeek:OnFoundMessage(message)
 	local payload = message.payload or {}
 
-	if payload.g ~= self.gameId or self.status ~= STATUS_SEEKING or not self:IsMessageFromSeeker(message) then
+	if payload.g ~= self.gameId or (not self:IsMessageFromHost(message) and not self:IsMessageFromSeeker(message)) then
 		WEP:Log("HideSeek", "found_message_ignored", {
 			sender = message.sender,
 			gameId = payload.g or "none",
-			reason = "state or seeker mismatch",
+			reason = "game or sender mismatch",
 		}, "warn")
 		return
 	end
@@ -2706,15 +3510,141 @@ function HideSeek:OnFoundMessage(message)
 		sender = message.sender,
 		player = payload.p or "none",
 		gameId = self.gameId,
+		nextSeeker = payload.ns or "none",
 	})
-	self:MarkFound(payload.p, message.sender, false)
+	self:MarkFound(payload.p, payload.by or message.sender, false)
 
 	if payload.p and isSelfName(payload.p) then
 		WEP:Print("You were found.")
 	end
 end
 
-function HideSeek:FinishGame(reason, broadcast)
+function HideSeek:MarkSafe(playerName, broadcast)
+	local player = self:GetPlayer(playerName)
+	if not self:IsActiveHider(player) then
+		return false
+	end
+
+	player.safe = true
+	player.pendingFound = false
+	WEP:Print(player.name, "reached the starting spot and is safe.")
+	playSound("ui_select")
+	WEP:Log("HideSeek", "player_safe", {
+		gameId = self.gameId or "none",
+		player = player.name,
+		broadcast = broadcast == true,
+	})
+
+	if broadcast then
+		self:BroadcastState()
+	end
+
+	self:RefreshWindow()
+
+	if self:IsHost() and self.status ~= STATUS_ENDED and self:AllHidersSafe() then
+		self:FinishGame("safe", true)
+	end
+
+	return true
+end
+
+function HideSeek:ProcessSafeRequest(playerName, senderName)
+	if not self:IsHost() or self.status ~= STATUS_SEEKING then
+		return false
+	end
+
+	if isBlank(playerName) or not namesMatch(playerName, senderName) then
+		WEP:Log("HideSeek", "safe_request_ignored", {
+			player = playerName or "none",
+			sender = senderName or "none",
+			reason = "sender mismatch",
+		}, "warn")
+		return false
+	end
+
+	local player = self:GetPlayer(playerName)
+	if not self:IsActiveHider(player) then
+		return false
+	end
+
+	if not self:IsSeekerAbsentForSafe() then
+		WEP:Log("HideSeek", "safe_request_ignored", {
+			gameId = self.gameId or "none",
+			player = player.name,
+			seekerAtStart = self.seekerAtStartSpot == true,
+			seekerSpotUpdatedAt = self.seekerSpotUpdatedAt or "none",
+			reason = "seeker not absent",
+		}, "warn")
+		return false
+	end
+
+	return self:MarkSafe(player.name, true)
+end
+
+function HideSeek:OnSafeMessage(message)
+	local payload = message.payload or {}
+
+	if not self:IsHost() then
+		return
+	end
+
+	if payload.g ~= self.gameId then
+		WEP:Log("HideSeek", "safe_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game mismatch",
+		}, "warn")
+		return
+	end
+
+	local playerName = payload.p or message.sender
+	if not messageSentBy(message, playerName) then
+		WEP:Log("HideSeek", "safe_message_ignored", {
+			sender = message.sender,
+			player = playerName or "none",
+			reason = "sender mismatch",
+		}, "warn")
+		return
+	end
+
+	self:ProcessSafeRequest(playerName, message.sender)
+end
+
+function HideSeek:OnSeekerSpotMessage(message)
+	local payload = message.payload or {}
+
+	if payload.g ~= self.gameId or not self:IsMessageFromSeeker(message) then
+		WEP:Log("HideSeek", "seeker_spot_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or seeker mismatch",
+		}, "warn")
+		return
+	end
+
+	if self.status ~= STATUS_SEEKING then
+		WEP:Log("HideSeek", "seeker_spot_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			status = self.status or "none",
+			reason = "not seeking",
+		}, "warn")
+		return
+	end
+
+	local atStart = tostring(payload.at or "") == "1"
+	self:UpdateSeekerSpotState(atStart, tonumber(payload.t) or Timer.Now())
+
+	if self:IsHost() and atStart then
+		WEP:Log("HideSeek", "seeker_at_start", {
+			gameId = self.gameId,
+			seeker = self.seeker or "none",
+		})
+		self:ConfirmPendingFoundAtStart()
+	end
+end
+
+function HideSeek:FinishGame(reason, broadcast, nextSeeker)
 	if not self.gameId then
 		WEP:Log("HideSeek", "finish_skipped", {
 			reason = "no game id",
@@ -2724,7 +3654,11 @@ function HideSeek:FinishGame(reason, broadcast)
 
 	self.status = STATUS_ENDED
 	self.resultReason = reason or "ended"
+	if not isBlank(nextSeeker) then
+		self.nextSeeker = nextSeeker
+	end
 	self.timerToken = (self.timerToken or 0) + 1
+	self:StopHomeMonitor()
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
@@ -2735,10 +3669,16 @@ function HideSeek:FinishGame(reason, broadcast)
 		gameId = self.gameId,
 		reason = self.resultReason,
 		broadcast = broadcast == true,
+		nextSeeker = self.nextSeeker or "none",
 	})
 
 	if reason == "found" then
 		WEP:Print("Hide and Seek ended: seeker wins.")
+		if self.nextSeeker then
+			WEP:Print("Next seeker:", self.nextSeeker)
+		end
+	elseif reason == "safe" then
+		WEP:Print("Hide and Seek ended: hiders win.")
 	elseif reason == "time" then
 		WEP:Print("Hide and Seek ended: hiders win.")
 	else
@@ -2749,6 +3689,7 @@ function HideSeek:FinishGame(reason, broadcast)
 		self:Broadcast(MSG_END, {
 			g = self.gameId,
 			r = reason or "ended",
+			ns = self.nextSeeker or "",
 		})
 	end
 
@@ -2771,8 +3712,9 @@ function HideSeek:OnEndMessage(message)
 		sender = message.sender,
 		gameId = self.gameId,
 		reason = payload.r or "ended",
+		nextSeeker = payload.ns or "none",
 	})
-	self:FinishGame(payload.r or "ended", false)
+	self:FinishGame(payload.r or "ended", false, payload.ns)
 end
 
 function HideSeek:LeaveGame()
@@ -2859,8 +3801,8 @@ function HideSeek:OnLeaveMessage(message)
 		self:FinishGame("canceled", true)
 	elseif self:GetHiderCount() == 0 then
 		self:FinishGame("canceled", true)
-	elseif self:AllHidersFound() then
-		self:FinishGame("found", true)
+	elseif self:AllHidersSafe() then
+		self:FinishGame("safe", true)
 	else
 		self:BroadcastState()
 	end
@@ -2868,6 +3810,7 @@ end
 
 function HideSeek:ResetGame()
 	local previousGameId = self.gameId
+	self:StopHomeMonitor()
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
@@ -2879,7 +3822,9 @@ function HideSeek:ResetGame()
 	self.seekEndsAt = nil
 	self.hideEndsAt = nil
 	self.resultReason = nil
+	self.nextSeeker = nil
 	self.starRevealUsesRemaining = 0
+	self:ClearStartSpot()
 	self.timerToken = (self.timerToken or 0) + 1
 	self:ResetRoster()
 	self:RefreshWindow()
@@ -2892,6 +3837,7 @@ function HideSeek:PrintStatus()
 	WEP:Print("Hide and Seek:", getStatusLabel(self.status))
 	WEP:Print("Host:", self.host or "none", "Players:", self:GetPlayerCount(), "Seeker:", self.seeker or "none")
 	WEP:Print("Timers:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
+	WEP:Print("Start:", self:GetStartSpotDetailText())
 	WEP:Print("Star reveal:", self:GetStarRevealText())
 	WEP:Print("Roster:", self:GetRosterText())
 end
@@ -2905,6 +3851,7 @@ function HideSeek:OnDisabled()
 	if self.gameId then
 		self:LeaveGame()
 	else
+		self:StopHomeMonitor()
 		self:HideCountdown()
 		ScreenOverlay.HideBlackout()
 		self:RestoreSeekerUI()

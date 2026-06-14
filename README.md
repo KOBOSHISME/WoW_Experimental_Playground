@@ -76,9 +76,11 @@ The addon includes an addon-managed Hide and Seek challenge. Open it with:
 /wep hide
 ```
 
-The window lets the host invite players one at a time, set the hiding countdown, seeking time, and optional Star reveal uses, start the game, view the roster, watch player states, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
+The window lets the host invite players one at a time, set the hiding countdown, seeking time, starting-spot radius, and optional Star reveal uses, start the game, view the roster, watch player states, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
 
-During a game, the starter randomly chooses the seeker. The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The Hide and Seek window updates timers and roster states while the seeker marks hiders found by targeting them before the seek timer expires. If the host enabled Star reveals, the seeker's tracker includes a Reveal button that briefly places the Star raid target icon on addressable, unfound hiders.
+During a game, the starter randomly chooses the seeker unless one is selected. The seeker's position when the round starts is captured as the starting spot. The starting-spot radius is measured in visible map-coordinate points on the 0-100 coordinate scale, not yards.
+
+The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The seeker tags a hider by targeting them, then must return to the starting spot to mark that hider found. Hiders become safe by reaching the starting spot and staying there for 1 second while the seeker is away. If all hiders become safe, hiders win. If any hider is found, the seeker wins and that hider is preselected as the next seeker. If the seek timer expires first, hiders win. If the host enabled Star reveals, the seeker's tracker includes a Reveal button that briefly places the Star raid target icon on addressable, active hiders.
 
 ## Tool Debug Commands
 
