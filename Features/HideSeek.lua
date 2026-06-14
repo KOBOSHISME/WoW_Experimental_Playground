@@ -2418,6 +2418,10 @@ function HideSeek:StartGame()
 		ru = self.starRevealUses,
 		t = Timer.Now(),
 	})
+
+	if gameWindow then
+		gameWindow:Hide()
+	end
 end
 
 function HideSeek:OnStartMessage(message)
