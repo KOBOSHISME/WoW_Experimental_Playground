@@ -55,9 +55,25 @@ local SEEKER_UI_GROUPS = {
 	"actionbars",
 }
 
+local TARGET_BINDING_COMMANDS = {
+	"TARGETPARTYMEMBER1",
+	"TARGETPARTYMEMBER2",
+	"TARGETPARTYMEMBER3",
+	"TARGETPARTYMEMBER4",
+}
+
+for index = 1, 40 do
+	TARGET_BINDING_COMMANDS[#TARGET_BINDING_COMMANDS + 1] = "TARGETRAID" .. index
+end
+
+local TARGET_BINDING_OWNER_NAME = "WEPHideSeekTargetBindingOwner"
+local TARGET_BINDING_BUTTON_NAME = "WEPHideSeekTargetBindingBlocker"
+
 local countdownFrame
 local gameWindow
 local trackerWindow
+local targetBindingOwner
+local targetBindingButton
 
 local TRACKER_MAX_NAMES = 4
 
@@ -280,6 +296,8 @@ function HideSeek:Initialize()
 	self.frame:SetScript("OnEvent", function(_, event)
 		if event == "PLAYER_TARGET_CHANGED" and self:IsEnabled() then
 			self:OnTargetChanged()
+		elseif event == "PLAYER_REGEN_ENABLED" then
+			self:OnPlayerRegenEnabled()
 		end
 	end)
 end
@@ -784,6 +802,27 @@ local function formatTrackerNames(names)
 	return table.concat(values, ", ")
 end
 
+local function isInCombatLockdown()
+	return InCombatLockdown and InCombatLockdown()
+end
+
+local function ensureTargetBindingBlocker()
+	if targetBindingOwner and targetBindingButton then
+		return targetBindingOwner
+	end
+
+	if not CreateFrame or not UIParent then
+		return nil
+	end
+
+	targetBindingOwner = CreateFrame("Frame", TARGET_BINDING_OWNER_NAME, UIParent)
+	targetBindingButton = CreateFrame("Button", TARGET_BINDING_BUTTON_NAME, targetBindingOwner)
+	targetBindingButton:SetScript("OnClick", function() end)
+	targetBindingButton:Hide()
+
+	return targetBindingOwner
+end
+
 function HideSeek:GetTrackerNames()
 	local playing = {}
 	local hiders = {}
@@ -881,6 +920,150 @@ function HideSeek:EnsureTrackerWindow()
 	trackerWindow = window
 	WEP:Log("HideSeek", "tracker_window_created")
 	return trackerWindow
+end
+
+function HideSeek:UpdateBindingRegenEvent()
+	if not self.frame then
+		return
+	end
+
+	if self.targetBindingBlockPending or self.targetBindingClearPending then
+		self.frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+	elseif self.frame.UnregisterEvent then
+		self.frame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+	end
+end
+
+function HideSeek:ShouldBlockTargetBindings()
+	return self.status == STATUS_SEEKING and self:IsSeeker()
+end
+
+function HideSeek:BlockSeekerTargetBindings()
+	if self.targetBindingsBlocked or not self:ShouldBlockTargetBindings() then
+		return self.targetBindingsBlocked == true
+	end
+
+	if not SetOverrideBinding or not GetBindingKey then
+		WEP:Log("HideSeek", "target_binding_block_unavailable", nil, "warn")
+		return false
+	end
+
+	if isInCombatLockdown() then
+		self.targetBindingBlockPending = true
+		self:UpdateBindingRegenEvent()
+		WEP:Log("HideSeek", "target_binding_block_delayed", {
+			reason = "combat lockdown",
+		}, "warn")
+		WEP:Print("Party target keybind blocking will apply after combat.")
+		return false
+	end
+
+	local owner = ensureTargetBindingBlocker()
+	if not owner then
+		WEP:Log("HideSeek", "target_binding_block_unavailable", {
+			reason = "binding owner unavailable",
+		}, "warn")
+		return false
+	end
+
+	local command = "CLICK " .. TARGET_BINDING_BUTTON_NAME .. ":LeftButton"
+	local blockedCount = 0
+	local seenKeys = {}
+
+	for _, bindingCommand in ipairs(TARGET_BINDING_COMMANDS) do
+		local keyCount = select("#", GetBindingKey(bindingCommand))
+
+		for index = 1, keyCount do
+			local key = select(index, GetBindingKey(bindingCommand))
+
+			if key and not seenKeys[key] then
+				local ok, err = pcall(SetOverrideBinding, owner, true, key, command)
+				seenKeys[key] = true
+
+				if ok then
+					blockedCount = blockedCount + 1
+				else
+					WEP:Log("HideSeek", "target_binding_block_failed", {
+						key = key,
+						error = err,
+					}, "error")
+				end
+			end
+		end
+	end
+
+	self.targetBindingBlockPending = false
+	self.targetBindingsBlocked = blockedCount > 0
+	self.blockedTargetBindingCount = blockedCount
+	self:UpdateBindingRegenEvent()
+
+	WEP:Log("HideSeek", "target_bindings_blocked", {
+		count = blockedCount,
+	})
+
+	if blockedCount > 0 then
+		WEP:Print("Party target keybinds disabled while you seek.")
+	end
+
+	return self.targetBindingsBlocked
+end
+
+function HideSeek:RestoreSeekerTargetBindings()
+	self.targetBindingBlockPending = false
+
+	if not self.targetBindingsBlocked then
+		self.targetBindingClearPending = false
+		self:UpdateBindingRegenEvent()
+		return true
+	end
+
+	if not ClearOverrideBindings or not targetBindingOwner then
+		self.targetBindingsBlocked = false
+		self.targetBindingClearPending = false
+		self.blockedTargetBindingCount = nil
+		self:UpdateBindingRegenEvent()
+		return false
+	end
+
+	if isInCombatLockdown() then
+		self.targetBindingClearPending = true
+		self:UpdateBindingRegenEvent()
+		WEP:Log("HideSeek", "target_binding_restore_delayed", {
+			reason = "combat lockdown",
+		}, "warn")
+		return false
+	end
+
+	local ok, err = pcall(ClearOverrideBindings, targetBindingOwner)
+	if not ok then
+		WEP:Log("HideSeek", "target_binding_restore_failed", {
+			error = err,
+		}, "error")
+		return false
+	end
+
+	WEP:Log("HideSeek", "target_bindings_restored", {
+		count = self.blockedTargetBindingCount or 0,
+	})
+	self.targetBindingsBlocked = false
+	self.targetBindingClearPending = false
+	self.blockedTargetBindingCount = nil
+	self:UpdateBindingRegenEvent()
+	return true
+end
+
+function HideSeek:OnPlayerRegenEnabled()
+	if self.targetBindingClearPending then
+		self:RestoreSeekerTargetBindings()
+	elseif self.targetBindingBlockPending then
+		if self:ShouldBlockTargetBindings() then
+			self:BlockSeekerTargetBindings()
+		else
+			self.targetBindingBlockPending = false
+		end
+	end
+
+	self:UpdateBindingRegenEvent()
 end
 
 function HideSeek:RefreshTrackerWindow()
@@ -1831,12 +2014,15 @@ function HideSeek:HideSeekerUI()
 		UIVisibility.Hide(groupName)
 	end
 
+	self:BlockSeekerTargetBindings()
 	WEP:Log("HideSeek", "seeker_ui_hidden", {
 		groups = #SEEKER_UI_GROUPS,
 	})
 end
 
 function HideSeek:RestoreSeekerUI()
+	self:RestoreSeekerTargetBindings()
+
 	if not self.seekerUiHidden then
 		return
 	end
