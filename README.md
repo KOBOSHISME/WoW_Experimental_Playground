@@ -76,9 +76,9 @@ The addon includes an addon-managed Hide and Seek challenge. Open it with:
 /wep hide
 ```
 
-The window lets the host invite players one at a time, set the hiding countdown and seeking time, start the game, view the roster, watch player states, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
+The window lets the host invite players one at a time, set the hiding countdown, seeking time, and optional Star reveal uses, start the game, view the roster, watch player states, or leave. Accepted players join the Hide and Seek roster without requiring a WoW party.
 
-During a game, the starter randomly chooses the seeker. The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The Hide and Seek window updates timers and roster states while the seeker marks hiders found by targeting them before the seek timer expires.
+During a game, the starter randomly chooses the seeker. The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The Hide and Seek window updates timers and roster states while the seeker marks hiders found by targeting them before the seek timer expires. If the host enabled Star reveals, the seeker's tracker includes a Reveal button that briefly places the Star raid target icon on addressable, unfound hiders.
 
 ## Tool Debug Commands
 

@@ -3,6 +3,8 @@ local _, WEP = ...
 local HideSeek = {
 	hideSeconds = 30,
 	seekSeconds = 300,
+	starRevealUses = 0,
+	starRevealUsesRemaining = 0,
 	players = {},
 	playerOrder = {},
 	pendingInvites = {},
@@ -26,6 +28,7 @@ local Sound = WEP.Tools.Sound
 local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
 local List = WEP.Tools.List
+local Environment = WEP.Tools.Environment
 
 WEP:Log("HideSeek", "loaded")
 
@@ -47,6 +50,10 @@ local MIN_HIDE_SECONDS = 5
 local MAX_HIDE_SECONDS = 300
 local MIN_SEEK_SECONDS = 30
 local MAX_SEEK_SECONDS = 3600
+local MIN_STAR_REVEAL_USES = 0
+local MAX_STAR_REVEAL_USES = 99
+local STAR_REVEAL_ICON = 1
+local STAR_REVEAL_SECONDS = 2
 
 local SEEKER_UI_GROUPS = {
 	"minimap",
@@ -123,6 +130,63 @@ end
 
 local function isSelfName(name)
 	return namesMatch(name, Player.GetShortName()) or namesMatch(name, Player.GetFullName())
+end
+
+local function getAddressableUnitTokens()
+	if not Environment or not Environment.GetUnitTokens then
+		return {}
+	end
+
+	return Environment.GetUnitTokens({
+		bossLimit = 0,
+		includeNameplates = true,
+		nameplateLimit = 40,
+		partyLimit = 4,
+		raidLimit = 40,
+	})
+end
+
+local function getUnitPlayerName(unit)
+	if isBlank(unit) or not UnitExists or not UnitExists(unit) then
+		return nil
+	end
+
+	if UnitIsPlayer and not UnitIsPlayer(unit) then
+		return nil
+	end
+
+	local name, realm
+	if UnitFullName then
+		name, realm = UnitFullName(unit)
+	end
+
+	if isBlank(name) and UnitName then
+		name, realm = UnitName(unit)
+	end
+
+	if isBlank(name) then
+		return nil
+	end
+
+	realm = Player.NormalizeRealmName(realm)
+	if realm then
+		return name .. "-" .. realm
+	end
+
+	return name
+end
+
+local function getRaidTargetIcon(unit)
+	if not GetRaidTargetIndex then
+		return nil, false
+	end
+
+	local ok, icon = pcall(GetRaidTargetIndex, unit)
+	if ok then
+		return icon, true
+	end
+
+	return nil, false
 end
 
 local function messageSentBy(message, playerName)
@@ -322,6 +386,8 @@ function HideSeek:CreateLobby()
 	self.seekEndsAt = nil
 	self.hideEndsAt = nil
 	self.resultReason = nil
+	self.starRevealUsesRemaining = 0
+	self:CancelStarReveal()
 	self:ResetRoster()
 	self:AddPlayer(Player.GetFullName(), false)
 	self:RefreshWindow()
@@ -358,6 +424,8 @@ function HideSeek:EnsureHostLobby()
 	if self.status == STATUS_ENDED then
 		self.status = STATUS_LOBBY
 		self.seeker = nil
+		self.starRevealUsesRemaining = 0
+		self:CancelStarReveal()
 		self:ClearFound()
 		WEP:Log("HideSeek", "ended_game_reopened", {
 			gameId = self.gameId,
@@ -512,6 +580,242 @@ function HideSeek:GetFoundCount()
 	return count
 end
 
+function HideSeek:GetStarRevealRemaining()
+	local maxUses = clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0)
+	local remaining = tonumber(self.starRevealUsesRemaining) or 0
+
+	if remaining < 0 then
+		return 0
+	end
+
+	if remaining > maxUses then
+		return maxUses
+	end
+
+	return math.floor(remaining)
+end
+
+function HideSeek:GetStarRevealText()
+	local maxUses = clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0)
+
+	if maxUses <= 0 then
+		return "off"
+	end
+
+	if self.status == STATUS_HIDING or self.status == STATUS_SEEKING then
+		return self:GetStarRevealRemaining() .. "/" .. maxUses
+	end
+
+	return tostring(maxUses)
+end
+
+function HideSeek:ResetStarRevealUses()
+	self.starRevealUses = clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0)
+	self.starRevealUsesRemaining = self.starRevealUses
+end
+
+function HideSeek:SetRaidTargetIcon(unit, icon)
+	if not SetRaidTarget or isBlank(unit) then
+		return false
+	end
+
+	local ok, err = pcall(SetRaidTarget, unit, icon)
+	if not ok then
+		WEP:Log("HideSeek", "raid_target_set_failed", {
+			unit = unit,
+			icon = icon,
+			error = err,
+		}, "warn")
+		return false
+	end
+
+	return true
+end
+
+function HideSeek:ClearStarRevealMarkers(markedUnits)
+	markedUnits = markedUnits or self.starRevealMarkedUnits
+	if type(markedUnits) ~= "table" then
+		return 0
+	end
+
+	local cleared = 0
+
+	for _, marker in ipairs(markedUnits) do
+		local unit = marker.unit
+
+		if unit and UnitExists and UnitExists(unit) then
+			local currentName = getUnitPlayerName(unit)
+			local icon, canReadIcon = getRaidTargetIcon(unit)
+			local isSamePlayer = not marker.name or namesMatch(currentName, marker.name)
+			local shouldClear = not canReadIcon or icon == STAR_REVEAL_ICON
+
+			if isSamePlayer and shouldClear and self:SetRaidTargetIcon(unit, 0) then
+				cleared = cleared + 1
+			end
+		end
+	end
+
+	if markedUnits == self.starRevealMarkedUnits then
+		self.starRevealMarkedUnits = nil
+	end
+
+	return cleared
+end
+
+function HideSeek:CancelStarReveal()
+	self.starRevealToken = (self.starRevealToken or 0) + 1
+	self:ClearStarRevealMarkers()
+end
+
+function HideSeek:ClearAllRaidTargets()
+	if not SetRaidTarget then
+		WEP:Log("HideSeek", "raid_target_clear_unavailable", nil, "warn")
+		return 0
+	end
+
+	local cleared = 0
+	local seenUnits = {}
+
+	for _, unit in ipairs(getAddressableUnitTokens()) do
+		if unit and not seenUnits[unit] and (not UnitExists or UnitExists(unit)) then
+			seenUnits[unit] = true
+
+			local icon, canReadIcon = getRaidTargetIcon(unit)
+			if (not canReadIcon or (tonumber(icon) or 0) > 0) and self:SetRaidTargetIcon(unit, 0) then
+				cleared = cleared + 1
+			end
+		end
+	end
+
+	WEP:Log("HideSeek", "raid_targets_cleared", {
+		count = cleared,
+	})
+	return cleared
+end
+
+function HideSeek:FindUnitTokenForPlayer(playerName, usedUnits)
+	if isBlank(playerName) then
+		return nil
+	end
+
+	usedUnits = usedUnits or {}
+
+	for _, unit in ipairs(getAddressableUnitTokens()) do
+		if unit and not usedUnits[unit] then
+			local unitName = getUnitPlayerName(unit)
+
+			if unitName and namesMatch(unitName, playerName) then
+				return unit
+			end
+		end
+	end
+
+	return nil
+end
+
+function HideSeek:CanUseStarRevealPower()
+	return self.status == STATUS_SEEKING
+		and self:IsSeeker()
+		and clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0) > 0
+		and self:GetStarRevealRemaining() > 0
+end
+
+function HideSeek:UseStarRevealPower()
+	if self.status ~= STATUS_SEEKING then
+		WEP:Print("Star reveal can only be used while seeking.")
+		return false
+	end
+
+	if not self:IsSeeker() then
+		WEP:Print("Only the seeker can use Star reveal.")
+		return false
+	end
+
+	if clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0) <= 0 then
+		WEP:Print("Star reveal is disabled for this game.")
+		return false
+	end
+
+	if self:GetStarRevealRemaining() <= 0 then
+		WEP:Print("No Star reveals remaining.")
+		return false
+	end
+
+	if not SetRaidTarget then
+		WEP:Print("Raid target icons are unavailable.")
+		return false
+	end
+
+	self:CancelStarReveal()
+
+	local markedUnits = {}
+	local usedUnits = {}
+	local hiderCount = 0
+	local missingCount = 0
+
+	for _, key in ipairs(self.playerOrder) do
+		local player = self.players[key]
+
+		if player and not player.found and not namesMatch(player.name, self.seeker) then
+			hiderCount = hiderCount + 1
+			local unit = self:FindUnitTokenForPlayer(player.name, usedUnits)
+
+			if unit then
+				usedUnits[unit] = true
+
+				if self:SetRaidTargetIcon(unit, STAR_REVEAL_ICON) then
+					markedUnits[#markedUnits + 1] = {
+						unit = unit,
+						name = player.name,
+					}
+				end
+			else
+				missingCount = missingCount + 1
+			end
+		end
+	end
+
+	if hiderCount == 0 then
+		WEP:Print("No hidden hiders remain.")
+		return false
+	end
+
+	if #markedUnits == 0 then
+		WEP:Print("No hiders could be marked. Hiders must be addressable as group, target, mouseover, focus, or nameplate units.")
+		WEP:Log("HideSeek", "star_reveal_failed", {
+			gameId = self.gameId or "none",
+			hiders = hiderCount,
+			missing = missingCount,
+		}, "warn")
+		return false
+	end
+
+	self.starRevealUsesRemaining = self:GetStarRevealRemaining() - 1
+	self.starRevealMarkedUnits = markedUnits
+	self.starRevealToken = (self.starRevealToken or 0) + 1
+	local token = self.starRevealToken
+
+	Timer.After(STAR_REVEAL_SECONDS, function()
+		if self.starRevealToken == token then
+			self:ClearStarRevealMarkers(markedUnits)
+		end
+	end)
+
+	WEP:Print("Star reveal used. Remaining:", self:GetStarRevealRemaining() .. "/" .. self.starRevealUses)
+	if missingCount > 0 then
+		WEP:Print(missingCount, "hider(s) were not close or grouped enough to mark.")
+	end
+
+	WEP:Log("HideSeek", "star_reveal_used", {
+		gameId = self.gameId or "none",
+		marked = #markedUnits,
+		missing = missingCount,
+		remaining = self:GetStarRevealRemaining(),
+	})
+	self:RefreshWindow()
+	return true
+end
+
 function HideSeek:GetSelectedSeeker()
 	if not self.seeker then
 		return nil
@@ -621,6 +925,7 @@ function HideSeek:GetSummary()
 		"Host: " .. (self.host or "none"),
 		"Players: " .. self:GetPlayerCount(),
 		"Hide: " .. formatDuration(self.hideSeconds) .. ", Seek: " .. formatDuration(self.seekSeconds),
+		"Star reveal: " .. self:GetStarRevealText(),
 	}
 
 	if self.seeker then
@@ -794,6 +1099,10 @@ function HideSeek:GetGameDetailText()
 		"Hide " .. formatDuration(self.hideSeconds),
 		"Seek " .. formatDuration(self.seekSeconds),
 	}
+
+	if clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0) > 0 then
+		details[#details + 1] = "Star " .. self:GetStarRevealText()
+	end
 
 	if self.seeker then
 		details[#details + 1] = "Seeker " .. self.seeker
@@ -990,6 +1299,16 @@ function HideSeek:EnsureTrackerWindow()
 	window.hidingText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
 	window.hidingText:SetJustifyH("LEFT")
 
+	window.revealButton = Form.CreateButton(window.footer, {
+		text = "Reveal",
+		width = 84,
+		height = 22,
+		onClick = function()
+			self:UseStarRevealPower()
+		end,
+	})
+	window.revealButton:SetPoint("LEFT", window.footer, "LEFT", 0, 0)
+
 	window.leaveButton = Form.CreateButton(window.footer, {
 		text = "Leave",
 		width = 72,
@@ -1176,6 +1495,19 @@ function HideSeek:RefreshTrackerWindow()
 	window.playingText:SetText("Playing: " .. formatTrackerNames(playing))
 	window.seekerText:SetText("Seeking: " .. (seeker or "Not chosen"))
 	window.hidingText:SetText("Hiding: " .. hidingText)
+	if window.revealButton then
+		if self:IsSeeker()
+			and self.status == STATUS_SEEKING
+			and clamp(self.starRevealUses, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, 0) > 0 then
+			window.revealButton:SetText("Reveal " .. self:GetStarRevealRemaining())
+			window.revealButton:Show()
+		else
+			window.revealButton:Hide()
+		end
+
+		setButtonEnabled(window.revealButton, self:CanUseStarRevealPower())
+	end
+
 	setButtonEnabled(window.leaveButton, self.gameId ~= nil)
 
 	if not window:IsShown() then
@@ -1274,6 +1606,13 @@ function HideSeek:EnsureWindow()
 	})
 	window.seekInput:SetPoint("TOPLEFT", window.hideInput, "TOPRIGHT", 12, 0)
 
+	window.starRevealInput = Form.CreateInput(content, {
+		label = "Star reveals",
+		width = 96,
+		numeric = true,
+	})
+	window.starRevealInput:SetPoint("TOPLEFT", window.seekInput, "TOPRIGHT", 12, 0)
+
 	window.applyButton = Form.CreateButton(content, {
 		text = "Apply",
 		width = 78,
@@ -1281,7 +1620,7 @@ function HideSeek:EnsureWindow()
 			self:ApplyWindowSettings()
 		end,
 	})
-	window.applyButton:SetPoint("LEFT", window.seekInput.editBox, "RIGHT", 12, 0)
+	window.applyButton:SetPoint("LEFT", window.starRevealInput.editBox, "RIGHT", 12, 0)
 
 	window.seekerInput = Form.CreateInput(content, {
 		label = "Seeker",
@@ -1405,11 +1744,13 @@ function HideSeek:RefreshWindow()
 
 	setInputValueIfNotFocused(window.hideInput, self.hideSeconds)
 	setInputValueIfNotFocused(window.seekInput, self.seekSeconds)
+	setInputValueIfNotFocused(window.starRevealInput, self.starRevealUses)
 	setInputValueIfNotFocused(window.seekerInput, self:GetSelectedSeeker() or "")
 
 	setInputEnabled(window.inviteInput, canHostControl)
 	setInputEnabled(window.hideInput, canHostControl)
 	setInputEnabled(window.seekInput, canHostControl)
+	setInputEnabled(window.starRevealInput, canHostControl)
 	setInputEnabled(window.seekerInput, canHostControl)
 	setButtonEnabled(window.inviteButton, canHostControl)
 	setButtonEnabled(window.applyButton, canHostControl)
@@ -1527,6 +1868,7 @@ function HideSeek:ReadWindowSettings()
 
 	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	self.starRevealUses = clamp(window.starRevealInput:GetValue(), MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 
 	if not self:ReadWindowSeeker() then
 		return false
@@ -1535,6 +1877,7 @@ function HideSeek:ReadWindowSettings()
 	WEP:Log("HideSeek", "window_settings_read", {
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
+		starRevealUses = self.starRevealUses,
 		seeker = self.seeker or "random",
 	})
 	return true
@@ -1556,11 +1899,12 @@ function HideSeek:ApplyWindowSettings()
 		return
 	end
 
-	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "seeker", self.seeker or "random")
+	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "star reveals", self.starRevealUses, "seeker", self.seeker or "random")
 	WEP:Log("HideSeek", "settings_applied", {
 		gameId = self.gameId or "none",
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
+		starRevealUses = self.starRevealUses,
 		seeker = self.seeker or "random",
 	})
 	self:BroadcastState()
@@ -1641,6 +1985,7 @@ function HideSeek:InvitePlayer(target)
 		h = self.host,
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
+		ru = self.starRevealUses,
 	})
 
 	if not ok then
@@ -1669,6 +2014,7 @@ function HideSeek:OnInviteRequest(request)
 	local host = not isBlank(data.h) and namesMatch(data.h, request.sender) and data.h or request.sender
 	local hideSeconds = clamp(data.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	local seekSeconds = clamp(data.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	local starRevealUses = clamp(data.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 
 	if isBlank(data.g) then
 		WEP:Log("HideSeek", "invite_request_ignored", {
@@ -1703,6 +2049,10 @@ function HideSeek:OnInviteRequest(request)
 		.. formatDuration(hideSeconds)
 		.. ", Seek: "
 		.. formatDuration(seekSeconds)
+
+	if starRevealUses > 0 then
+		message = message .. ", Star reveals: " .. starRevealUses
+	end
 
 	Dialog.Show({
 		title = "Hide and Seek Challenge",
@@ -1754,6 +2104,7 @@ function HideSeek:OnInviteRequest(request)
 				self.host = host
 				self.hideSeconds = hideSeconds
 				self.seekSeconds = seekSeconds
+				self.starRevealUses = starRevealUses
 				self.status = STATUS_LOBBY
 				self.seeker = nil
 				self:ResetRoster()
@@ -1861,6 +2212,7 @@ function HideSeek:BroadcastState()
 		sk = self.seeker or "",
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
+		ru = self.starRevealUses,
 	})
 
 	if ok then
@@ -1935,12 +2287,14 @@ function HideSeek:OnStateMessage(message)
 	self.seeker = not isBlank(payload.sk) and payload.sk or nil
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	self.starRevealUses = clamp(payload.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 	self:ResetRoster()
 	self:RefreshWindow()
 	WEP:Log("HideSeek", "state_message_applied", {
 		gameId = self.gameId,
 		status = self.status,
 		host = self.host,
+		starRevealUses = self.starRevealUses,
 	})
 end
 
@@ -2041,6 +2395,7 @@ function HideSeek:StartGame()
 		seeker = seeker,
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
+		starRevealUses = self.starRevealUses,
 	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, Timer.Now())
 	self:BroadcastState()
@@ -2049,6 +2404,7 @@ function HideSeek:StartGame()
 		sk = seeker,
 		hs = self.hideSeconds,
 		ss = self.seekSeconds,
+		ru = self.starRevealUses,
 		t = Timer.Now(),
 	})
 end
@@ -2068,10 +2424,12 @@ function HideSeek:OnStartMessage(message)
 	self.seeker = payload.sk
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	self.starRevealUses = clamp(payload.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 	self:ClearFound()
 	WEP:Log("HideSeek", "start_message_applied", {
 		gameId = self.gameId,
 		seeker = self.seeker or "none",
+		starRevealUses = self.starRevealUses,
 	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, tonumber(payload.t) or Timer.Now())
 end
@@ -2082,6 +2440,9 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 	self.seekEndsAt = nil
 	self.hideEndsAt = (tonumber(startedAt) or Timer.Now()) + hideSeconds
 	self.resultReason = nil
+	self:ResetStarRevealUses()
+	self:CancelStarReveal()
+	self:ClearAllRaidTargets()
 	self.timerToken = (self.timerToken or 0) + 1
 	local token = self.timerToken
 	local remaining = self.hideEndsAt - Timer.Now()
@@ -2095,6 +2456,7 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 		seeker = self.seeker or "none",
 		hideSeconds = hideSeconds,
 		seekSeconds = seekSeconds,
+		starRevealUses = self.starRevealUses,
 		remaining = remaining,
 	})
 
@@ -2351,6 +2713,7 @@ function HideSeek:FinishGame(reason, broadcast)
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
+	self:CancelStarReveal()
 	self.hideEndsAt = nil
 	self.seekEndsAt = nil
 	WEP:Log("HideSeek", "finished", {
@@ -2493,6 +2856,7 @@ function HideSeek:ResetGame()
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
+	self:CancelStarReveal()
 	self.status = STATUS_IDLE
 	self.gameId = nil
 	self.host = nil
@@ -2500,6 +2864,7 @@ function HideSeek:ResetGame()
 	self.seekEndsAt = nil
 	self.hideEndsAt = nil
 	self.resultReason = nil
+	self.starRevealUsesRemaining = 0
 	self.timerToken = (self.timerToken or 0) + 1
 	self:ResetRoster()
 	self:RefreshWindow()
@@ -2512,6 +2877,7 @@ function HideSeek:PrintStatus()
 	WEP:Print("Hide and Seek:", getStatusLabel(self.status))
 	WEP:Print("Host:", self.host or "none", "Players:", self:GetPlayerCount(), "Seeker:", self.seeker or "none")
 	WEP:Print("Timers:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
+	WEP:Print("Star reveal:", self:GetStarRevealText())
 	WEP:Print("Roster:", self:GetRosterText())
 end
 
@@ -2527,6 +2893,7 @@ function HideSeek:OnDisabled()
 		self:HideCountdown()
 		ScreenOverlay.HideBlackout()
 		self:RestoreSeekerUI()
+		self:CancelStarReveal()
 	end
 
 	if gameWindow then
