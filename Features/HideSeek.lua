@@ -776,7 +776,7 @@ function HideSeek:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPHideSeekWindow",
 		title = "Hide and Seek",
-		width = 540,
+		width = 600,
 		height = 430,
 		onShow = function()
 			self:RefreshWindow()
@@ -825,14 +825,14 @@ function HideSeek:EnsureWindow()
 			self:InviteFromWindow()
 		end,
 	})
-	window.inviteButton:SetPoint("TOPLEFT", window.inviteInput, "TOPRIGHT", 12, 18)
+	window.inviteButton:SetPoint("LEFT", window.inviteInput.editBox, "RIGHT", 12, 0)
 
 	window.hideInput = Form.CreateInput(content, {
 		label = "Hide seconds",
 		width = 92,
 		numeric = true,
 	})
-	window.hideInput:SetPoint("TOPLEFT", window.inviteButton, "TOPRIGHT", 18, -18)
+	window.hideInput:SetPoint("TOPLEFT", window.inviteButton, "TOPRIGHT", 18, 18)
 
 	window.seekInput = Form.CreateInput(content, {
 		label = "Seek seconds",
@@ -848,7 +848,7 @@ function HideSeek:EnsureWindow()
 			self:ApplyWindowSettings()
 		end,
 	})
-	window.applyButton:SetPoint("TOPLEFT", window.seekInput, "TOPRIGHT", 12, 18)
+	window.applyButton:SetPoint("LEFT", window.seekInput.editBox, "RIGHT", 12, 0)
 
 	window.rosterTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	window.rosterTitle:SetPoint("TOPLEFT", window.inviteInput, "BOTTOMLEFT", 0, -18)
