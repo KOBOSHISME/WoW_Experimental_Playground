@@ -346,11 +346,18 @@ function Requests.Send(target, requestType, data, options)
 	addDataToPayload(payload, copiedData)
 
 	local sendOptions = copyOptions(options)
-	sendOptions.transport = sendOptions.transport and string.upper(tostring(sendOptions.transport)) or "CHANNEL"
 
 	if sendOptions.distribution then
 		sendOptions.distribution = string.upper(tostring(sendOptions.distribution))
 	end
+
+	if not sendOptions.transport and not sendOptions.distribution and WEP.Comm.GetDefaultBroadcastOptions then
+		sendOptions = WEP.Comm:GetDefaultBroadcastOptions()
+	end
+
+	sendOptions.transport = sendOptions.transport
+		and string.upper(tostring(sendOptions.transport))
+		or (sendOptions.distribution and "ADDON" or "CHANNEL")
 
 	if sendOptions.transport == "ADDON"
 		and sendOptions.distribution == "WHISPER"

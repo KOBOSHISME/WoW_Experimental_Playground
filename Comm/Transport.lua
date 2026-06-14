@@ -144,6 +144,42 @@ function Comm:RegisterAddonPrefix()
 	}, self.addonPrefixRegistered and "info" or "warn")
 end
 
+function Comm:GetGroupDistribution()
+	if IsInRaid and IsInRaid() then
+		return "RAID"
+	end
+
+	if IsInGroup and IsInGroup() then
+		return "PARTY"
+	end
+
+	if GetNumGroupMembers then
+		local count = GetNumGroupMembers()
+
+		if count and count > 0 then
+			return "PARTY"
+		end
+	end
+
+	return nil
+end
+
+function Comm:GetDefaultBroadcastOptions()
+	local commDb = WEP.db and WEP.db.comm
+	local distribution = self:GetGroupDistribution()
+
+	if distribution and commDb and commDb.addonMessages and self.addonPrefixRegistered then
+		return {
+			transport = "ADDON",
+			distribution = distribution,
+		}
+	end
+
+	return {
+		transport = "CHANNEL",
+	}
+end
+
 function Comm:CleanupOldDiscoveryChannels()
 	if not GetChannelName or not LeaveChannelByName then
 		return

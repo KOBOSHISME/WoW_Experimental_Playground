@@ -1285,9 +1285,7 @@ function HideSeek:OnInviteResponse(response)
 end
 
 function HideSeek:Broadcast(messageType, payload)
-	local ok, messageIdOrErr = WEP.Comm:Send(messageType, payload, {
-		transport = "CHANNEL",
-	})
+	local ok, messageIdOrErr = WEP.Comm:Send(messageType, payload, WEP.Comm:GetDefaultBroadcastOptions())
 
 	if not ok then
 		WEP:Log("HideSeek", "broadcast_failed", {

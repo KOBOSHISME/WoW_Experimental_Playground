@@ -249,9 +249,7 @@ function Diagnostics:SendPing()
 
 	local ok, messageIdOrErr = WEP.Comm:Send("PING", {
 		source = "slash",
-	}, {
-		transport = "CHANNEL",
-	})
+	}, WEP.Comm:GetDefaultBroadcastOptions())
 
 	if not ok then
 		WEP:Log("Diagnostics", "ping_send_failed", {
@@ -266,7 +264,7 @@ function Diagnostics:SendPing()
 		responses = 0,
 	}
 
-	WEP:Print("PING queued on hidden discovery channel.")
+	WEP:Print("PING queued.")
 	WEP:Log("Diagnostics", "ping_queued", {
 		messageId = messageIdOrErr,
 	})
@@ -299,9 +297,7 @@ function Diagnostics.OnPing(_, message)
 	Timer.After(delay, function()
 		WEP.Comm:Send("PONG", {
 			replyTo = message.id,
-		}, {
-			transport = "CHANNEL",
-		})
+		}, WEP.Comm:GetDefaultBroadcastOptions())
 	end)
 end
 

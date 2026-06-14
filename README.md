@@ -66,7 +66,7 @@ The addon includes a small hidden communication diagnostic feature:
 /wep comm debug
 ```
 
-`/wep comm ping` sends a hidden discovery-channel ping. Other players with the addon respond with a `PONG` after a short randomized delay.
+`/wep comm ping` uses party/raid addon messages when grouped, falling back to the hidden discovery channel otherwise. Other players with the addon respond with a `PONG` after a short randomized delay.
 
 ## Hide and Seek
 
