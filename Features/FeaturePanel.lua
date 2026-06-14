@@ -5,6 +5,8 @@ WEP.FeaturePanel = FeaturePanel
 
 local WindowTool = WEP.Tools.Window
 
+WEP:Log("FeaturePanel", "loaded")
+
 local ROW_HEIGHT = 48
 
 local panelWindow
@@ -58,8 +60,16 @@ local function ensureRow(window, index)
 			return
 		end
 
+		WEP:Log("FeaturePanel", "feature_toggle_clicked", {
+			id = row.featureId,
+			enabled = getCheckedValue(button),
+		})
 		local ok, err = WEP:SetFeatureEnabled(row.featureId, getCheckedValue(button))
 		if not ok then
+			WEP:Log("FeaturePanel", "feature_toggle_failed", {
+				id = row.featureId,
+				error = err,
+			}, "error")
 			WEP:Print("Feature toggle failed:", err)
 		end
 
@@ -76,6 +86,7 @@ function FeaturePanel:EnsureWindow()
 	end
 
 	if not WindowTool then
+		WEP:Log("FeaturePanel", "window_unavailable", nil, "error")
 		WEP:Print("Feature panel UI tools are unavailable.")
 		return nil
 	end
@@ -91,6 +102,9 @@ function FeaturePanel:EnsureWindow()
 	})
 
 	if not window then
+		WEP:Log("FeaturePanel", "window_failed", {
+			error = err,
+		}, "error")
 		WEP:Print("Feature panel failed:", err)
 		return nil
 	end
@@ -113,6 +127,7 @@ function FeaturePanel:EnsureWindow()
 	window.emptyText:Hide()
 
 	panelWindow = window
+	WEP:Log("FeaturePanel", "window_created")
 	return panelWindow
 end
 
@@ -132,6 +147,10 @@ function FeaturePanel:RefreshWindow()
 	end
 
 	window.summaryText:SetText("Active features: " .. activeCount .. "/" .. #features)
+	WEP:Log("FeaturePanel", "refreshed", {
+		active = activeCount,
+		total = #features,
+	})
 
 	for index, feature in ipairs(features) do
 		local row = ensureRow(window, index)
@@ -167,6 +186,6 @@ function FeaturePanel:ShowWindow()
 	end
 
 	window:Show()
+	WEP:Log("FeaturePanel", "shown")
 	self:RefreshWindow()
 end
-

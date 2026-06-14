@@ -48,6 +48,16 @@ Open the default feature panel with:
 
 The panel lists registered features and lets you turn each one on or off.
 
+Recent addon activity is stored in a capped saved log buffer for after-the-fact debugging:
+
+```text
+/wep logs
+/wep logs 25
+/wep logs clear
+/wep logs echo on
+/wep logs echo off
+```
+
 The addon includes a small hidden communication diagnostic feature:
 
 ```text

@@ -5,6 +5,8 @@ WEP.Tools = WEP.Tools or {}
 local Form = {}
 WEP.Tools.Form = Form
 
+WEP:Log("Form", "loaded")
+
 local DEFAULT_INPUT_WIDTH = 140
 local DEFAULT_INPUT_HEIGHT = 24
 local DEFAULT_BUTTON_WIDTH = 96
@@ -44,6 +46,9 @@ function Form.CreateLabel(parent, config)
 		label:SetWidth(config.width)
 	end
 
+	WEP:Log("Form", "label_created", {
+		text = config.text or "",
+	})
 	return label
 end
 
@@ -109,8 +114,20 @@ function Form.CreateInput(parent, config)
 		if self.editBox.SetAlpha then
 			self.editBox:SetAlpha(enabled and 1 or 0.45)
 		end
+
+		if self.lastLoggedEnabled ~= enabled then
+			self.lastLoggedEnabled = enabled
+			WEP:Log("Form", "input_enabled_set", {
+				label = config.label or "",
+				enabled = enabled,
+			})
+		end
 	end
 
+	WEP:Log("Form", "input_created", {
+		label = config.label or "",
+		numeric = config.numeric == true,
+	})
 	return frame
 end
 
@@ -123,6 +140,9 @@ function Form.CreateButton(parent, config)
 
 	if type(config.onClick) == "function" then
 		button:SetScript("OnClick", function()
+			WEP:Log("Form", "button_clicked", {
+				text = config.text or "Button",
+			})
 			config.onClick(button)
 		end)
 	end
@@ -133,5 +153,8 @@ function Form.CreateButton(parent, config)
 
 	setEnabled(button, config.enabled)
 
+	WEP:Log("Form", "button_created", {
+		text = config.text or "Button",
+	})
 	return button
 end

@@ -18,6 +18,8 @@ WEP.Tools.Sound = Sound
 
 local Timer = WEP.Tools.Timer
 
+WEP:Log("Sound", "loaded")
+
 local DEFAULT_CHANNEL = "Master"
 local DEFAULT_CUSTOM_DIR = "Sounds\\Custom"
 local ADDON_SOUND_PREFIX = "Interface\\AddOns\\"
@@ -266,6 +268,10 @@ end
 local function playWith(playFunction, resolved, options, ...)
 	if type(playFunction) ~= "function" then
 		Sound.stats.failed = Sound.stats.failed + 1
+		WEP:Log("Sound", "play_failed", {
+			name = resolved and resolved.name or "unknown",
+			error = "sound playback API is unavailable",
+		}, "error")
 		return false, "sound playback API is unavailable"
 	end
 
@@ -274,12 +280,21 @@ local function playWith(playFunction, resolved, options, ...)
 		playback.skipped = true
 		playback.reason = "volume is 0"
 		Sound.stats.skipped = Sound.stats.skipped + 1
+		WEP:Log("Sound", "play_skipped", {
+			name = playback.name,
+			reason = playback.reason,
+			volume = playback.volume,
+		}, "warn")
 		return true, playback
 	end
 
 	local ok, willPlay, handle = pcall(playFunction, ...)
 	if not ok then
 		Sound.stats.failed = Sound.stats.failed + 1
+		WEP:Log("Sound", "play_failed", {
+			name = resolved and resolved.name or "unknown",
+			error = willPlay,
+		}, "error")
 		return false, willPlay
 	end
 
@@ -289,22 +304,40 @@ local function playWith(playFunction, resolved, options, ...)
 
 	if willPlay == false then
 		Sound.stats.failed = Sound.stats.failed + 1
+		WEP:Log("Sound", "play_failed", {
+			name = resolved and resolved.name or "unknown",
+			error = "sound did not play",
+		}, "error")
 		return false, "sound did not play"
 	end
 
 	local playback = makePlayback(resolved, options, handle)
 	trackDuration(playback)
 	Sound.stats.played = Sound.stats.played + 1
+	WEP:Log("Sound", "played", {
+		name = playback.name,
+		kind = playback.kind,
+		channel = playback.channel,
+		handle = playback.handle or "none",
+		duration = playback.duration or "none",
+	})
 
 	return true, playback
 end
 
 function Sound.RegisterGame(name, soundKit, label)
 	if isBlank(name) then
+		WEP:Log("Sound", "register_game_failed", {
+			error = "sound name is required",
+		}, "error")
 		return false, "sound name is required"
 	end
 
 	if isBlank(soundKit) then
+		WEP:Log("Sound", "register_game_failed", {
+			name = name,
+			error = "sound kit is required",
+		}, "error")
 		return false, "sound kit is required"
 	end
 
@@ -316,21 +349,36 @@ function Sound.RegisterGame(name, soundKit, label)
 		soundKit = soundKit,
 	}
 
+	WEP:Log("Sound", "register_game", {
+		name = soundName,
+		label = label or soundName,
+	})
 	return true
 end
 
 function Sound.RegisterCustom(name, relativePath, label)
 	if isBlank(name) then
+		WEP:Log("Sound", "register_custom_failed", {
+			error = "sound name is required",
+		}, "error")
 		return false, "sound name is required"
 	end
 
 	local customRelativePath, relativePathErr = makeCustomRelativePath(relativePath)
 	if not customRelativePath then
+		WEP:Log("Sound", "register_custom_failed", {
+			name = name,
+			error = relativePathErr,
+		}, "error")
 		return false, relativePathErr
 	end
 
 	local path, pathErr = makeAddonPath(customRelativePath)
 	if not path then
+		WEP:Log("Sound", "register_custom_failed", {
+			name = name,
+			error = pathErr,
+		}, "error")
 		return false, pathErr
 	end
 
@@ -343,6 +391,10 @@ function Sound.RegisterCustom(name, relativePath, label)
 		relativePath = customRelativePath,
 	}
 
+	WEP:Log("Sound", "register_custom", {
+		name = soundName,
+		path = customRelativePath,
+	})
 	return true
 end
 
@@ -441,6 +493,10 @@ end
 function Sound.Play(sound, options)
 	local resolved, resolveErr = Sound.Resolve(sound)
 	if not resolved then
+		WEP:Log("Sound", "resolve_failed", {
+			sound = sound,
+			error = resolveErr,
+		}, "error")
 		return false, resolveErr
 	end
 
@@ -449,6 +505,10 @@ function Sound.Play(sound, options)
 	if resolved.kind == "game" then
 		local soundKit = resolveSoundKit(resolved)
 		if not soundKit then
+			WEP:Log("Sound", "play_failed", {
+				name = resolved.name,
+				error = "game sound kit is unavailable",
+			}, "error")
 			return false, "game sound kit is unavailable"
 		end
 
@@ -457,12 +517,21 @@ function Sound.Play(sound, options)
 
 	if resolved.kind == "custom" or resolved.kind == "file" then
 		if isBlank(resolved.path) then
+			WEP:Log("Sound", "play_failed", {
+				name = resolved.name,
+				error = "sound file path is required",
+			}, "error")
 			return false, "sound file path is required"
 		end
 
 		return playWith(PlaySoundFile, resolved, options, resolved.path, options.channel)
 	end
 
+	WEP:Log("Sound", "play_failed", {
+		name = resolved.name,
+		kind = resolved.kind,
+		error = "unsupported sound kind",
+	}, "error")
 	return false, "unsupported sound kind: " .. tostring(resolved.kind)
 end
 
@@ -500,21 +569,36 @@ end
 
 function Sound.Stop(handle, fadeOut)
 	if not handle then
+		WEP:Log("Sound", "stop_failed", {
+			error = "sound handle is required",
+		}, "error")
 		return false, "sound handle is required"
 	end
 
 	if type(StopSound) ~= "function" then
+		WEP:Log("Sound", "stop_failed", {
+			handle = handle,
+			error = "StopSound API is unavailable",
+		}, "error")
 		return false, "StopSound API is unavailable"
 	end
 
 	local ok, err = pcall(StopSound, handle, clamp(fadeOut or 0, 0, 60))
 	if not ok then
 		Sound.stats.failed = Sound.stats.failed + 1
+		WEP:Log("Sound", "stop_failed", {
+			handle = handle,
+			error = err,
+		}, "error")
 		return false, err
 	end
 
 	Sound.activeHandles[handle] = nil
 	Sound.stats.stopped = Sound.stats.stopped + 1
+	WEP:Log("Sound", "stopped", {
+		handle = handle,
+		fadeOut = fadeOut or 0,
+	})
 
 	return true
 end
@@ -529,6 +613,10 @@ function Sound.StopAll(fadeOut)
 		end
 	end
 
+	WEP:Log("Sound", "stop_all", {
+		stopped = stopped,
+		fadeOut = fadeOut or 0,
+	})
 	return stopped
 end
 

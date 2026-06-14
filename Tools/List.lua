@@ -5,6 +5,8 @@ WEP.Tools = WEP.Tools or {}
 local List = {}
 WEP.Tools.List = List
 
+WEP:Log("List", "loaded")
+
 local DEFAULT_ROW_HEIGHT = 24
 local DEFAULT_WIDTH = 360
 local DEFAULT_VISIBLE_ROWS = 8
@@ -87,6 +89,15 @@ function List.Create(parent, config)
 		items = items or {}
 		local visibleCount = math.min(#items, self.visibleRows)
 
+		if self.lastLoggedCount ~= #items or self.lastLoggedVisibleCount ~= visibleCount then
+			self.lastLoggedCount = #items
+			self.lastLoggedVisibleCount = visibleCount
+			WEP:Log("List", "items_set", {
+				count = #items,
+				visible = visibleCount,
+			})
+		end
+
 		for index = 1, visibleCount do
 			local item = items[index]
 			local row = ensureRow(self, index)
@@ -143,7 +154,15 @@ function List.Create(parent, config)
 	function list:SetEmptyText(text)
 		self.emptyText = text or ""
 		self.frame.empty:SetText(self.emptyText)
+		WEP:Log("List", "empty_text_set", {
+			text = self.emptyText,
+		})
 	end
 
+	WEP:Log("List", "created", {
+		columns = #list.columns,
+		visibleRows = visibleRows,
+		width = width,
+	})
 	return list
 end

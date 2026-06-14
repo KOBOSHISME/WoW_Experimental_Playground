@@ -27,6 +27,8 @@ local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
 local List = WEP.Tools.List
 
+WEP:Log("HideSeek", "loaded")
+
 local REQUEST_INVITE = "hide_seek_invite"
 local MSG_STATE = "hide_seek_state"
 local MSG_ROSTER = "hide_seek_roster"
@@ -194,6 +196,7 @@ function HideSeek:Initialize()
 
 	self.initialized = true
 	self.status = STATUS_IDLE
+	WEP:Log("HideSeek", "initialize")
 
 	if math.randomseed then
 		local seed = Timer.Now()
@@ -299,6 +302,10 @@ function HideSeek:CreateLobby()
 	self:ResetRoster()
 	self:AddPlayer(Player.GetFullName(), false)
 	self:RefreshWindow()
+	WEP:Log("HideSeek", "lobby_created", {
+		gameId = self.gameId,
+		host = self.host,
+	})
 	return self.gameId
 end
 
@@ -308,11 +315,19 @@ function HideSeek:EnsureHostLobby()
 	end
 
 	if not self:IsHost() then
+		WEP:Log("HideSeek", "host_control_denied", {
+			gameId = self.gameId or "none",
+			host = self.host or "none",
+		}, "warn")
 		WEP:Print("Only the Hide and Seek host can change this game.")
 		return false
 	end
 
 	if self.status ~= STATUS_LOBBY and self.status ~= STATUS_ENDED then
+		WEP:Log("HideSeek", "host_control_busy", {
+			gameId = self.gameId or "none",
+			status = self.status or "none",
+		}, "warn")
 		WEP:Print("Hide and Seek is already in progress.")
 		return false
 	end
@@ -321,6 +336,9 @@ function HideSeek:EnsureHostLobby()
 		self.status = STATUS_LOBBY
 		self.seeker = nil
 		self:ClearFound()
+		WEP:Log("HideSeek", "ended_game_reopened", {
+			gameId = self.gameId,
+		})
 	end
 
 	return true
@@ -377,6 +395,11 @@ function HideSeek:AddPlayer(name, found)
 		}
 		self.players[key] = player
 		self.playerOrder[#self.playerOrder + 1] = key
+		WEP:Log("HideSeek", "player_added", {
+			gameId = self.gameId or "none",
+			player = name,
+			found = found == true,
+		})
 	else
 		player.name = name
 		player.found = player.found or found == true
@@ -400,6 +423,10 @@ function HideSeek:RemovePlayer(name)
 		end
 	end
 
+	WEP:Log("HideSeek", "player_removed", {
+		gameId = self.gameId or "none",
+		player = name,
+	})
 	return true
 end
 
@@ -741,6 +768,7 @@ function HideSeek:EnsureWindow()
 	end
 
 	if not WindowTool or not Form or not List then
+		WEP:Log("HideSeek", "window_tools_unavailable", nil, "error")
 		WEP:Print("Hide and Seek UI tools are unavailable.")
 		return nil
 	end
@@ -757,6 +785,9 @@ function HideSeek:EnsureWindow()
 	})
 
 	if not window then
+		WEP:Log("HideSeek", "window_failed", {
+			error = err,
+		}, "error")
 		WEP:Print("Hide and Seek window failed:", err)
 		return nil
 	end
@@ -873,6 +904,7 @@ function HideSeek:EnsureWindow()
 	window.refreshButton:SetPoint("LEFT", window.leaveButton, "RIGHT", 8, 0)
 
 	gameWindow = window
+	WEP:Log("HideSeek", "window_created")
 	return gameWindow
 end
 
@@ -932,6 +964,10 @@ function HideSeek:ShowWindow(focusInvite)
 	end
 
 	window:Show()
+	WEP:Log("HideSeek", "window_shown", {
+		focusInvite = focusInvite == true,
+		status = self.status or "none",
+	})
 	self:RefreshWindow()
 
 	if focusInvite and window.inviteInput and window.inviteInput.editBox then
@@ -946,6 +982,7 @@ function HideSeek:InviteFromWindow()
 		return
 	end
 
+	WEP:Log("HideSeek", "invite_from_window")
 	if self:InvitePlayer(window.inviteInput:GetValue()) then
 		window.inviteInput:SetValue("")
 	end
@@ -961,6 +998,10 @@ function HideSeek:ReadWindowSettings()
 
 	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+	WEP:Log("HideSeek", "window_settings_read", {
+		hideSeconds = self.hideSeconds,
+		seekSeconds = self.seekSeconds,
+	})
 end
 
 function HideSeek:ApplyWindowSettings()
@@ -976,6 +1017,11 @@ function HideSeek:ApplyWindowSettings()
 
 	self:ReadWindowSettings()
 	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
+	WEP:Log("HideSeek", "settings_applied", {
+		gameId = self.gameId or "none",
+		hideSeconds = self.hideSeconds,
+		seekSeconds = self.seekSeconds,
+	})
 	self:BroadcastState()
 	self:RefreshWindow()
 end
@@ -1022,8 +1068,15 @@ end
 
 function HideSeek:InvitePlayer(target)
 	target = trim(target)
+	WEP:Log("HideSeek", "invite_requested", {
+		target = target,
+		gameId = self.gameId or "none",
+	})
 
 	if target == "" then
+		WEP:Log("HideSeek", "invite_failed", {
+			error = "missing target",
+		}, "warn")
 		WEP:Print("Hide and Seek invite needs a player name.")
 		self:ShowInvitePrompt()
 		return false
@@ -1034,6 +1087,10 @@ function HideSeek:InvitePlayer(target)
 	end
 
 	if isSelfName(target) then
+		WEP:Log("HideSeek", "invite_failed", {
+			target = target,
+			error = "self invite",
+		}, "warn")
 		WEP:Print("You are already in the Hide and Seek lobby.")
 		return false
 	end
@@ -1046,12 +1103,21 @@ function HideSeek:InvitePlayer(target)
 	})
 
 	if not ok then
+		WEP:Log("HideSeek", "invite_failed", {
+			target = target,
+			error = requestIdOrErr,
+		}, "error")
 		WEP:Print("Hide and Seek invite failed:", requestIdOrErr)
 		return false
 	end
 
 	self.pendingInvites[requestIdOrErr] = target
 	WEP:Print("Hide and Seek invite sent to", target .. ".")
+	WEP:Log("HideSeek", "invite_sent", {
+		target = target,
+		requestId = requestIdOrErr,
+		gameId = self.gameId,
+	})
 	self:BroadcastState()
 	self:RefreshWindow()
 	return true
@@ -1064,8 +1130,18 @@ function HideSeek:OnInviteRequest(request)
 	local seekSeconds = clamp(data.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 
 	if isBlank(data.g) then
+		WEP:Log("HideSeek", "invite_request_ignored", {
+			sender = request.sender,
+			reason = "missing game id",
+		}, "warn")
 		return
 	end
+
+	WEP:Log("HideSeek", "invite_request_received", {
+		sender = request.sender,
+		host = host,
+		gameId = data.g,
+	})
 
 	if self:IsBusy() then
 		Requests.Respond(request.id, request.sender, "declined", {
@@ -1073,6 +1149,10 @@ function HideSeek:OnInviteRequest(request)
 			p = Player.GetFullName(),
 			reason = "busy",
 		})
+		WEP:Log("HideSeek", "invite_declined_busy", {
+			sender = request.sender,
+			gameId = data.g,
+		}, "warn")
 		WEP:Print("Declined Hide and Seek invite from", host .. ":", "already in a game.")
 		return
 	end
@@ -1105,6 +1185,10 @@ function HideSeek:OnInviteRequest(request)
 					p = Player.GetFullName(),
 					reason = "busy",
 				})
+				WEP:Log("HideSeek", "invite_accept_blocked_busy", {
+					sender = request.sender,
+					gameId = data.g,
+				}, "warn")
 				WEP:Print("Declined Hide and Seek invite from", host .. ":", "already in a game.")
 				return
 			end
@@ -1115,6 +1199,11 @@ function HideSeek:OnInviteRequest(request)
 			})
 
 			if not ok then
+				WEP:Log("HideSeek", "invite_response_failed", {
+					sender = request.sender,
+					status = status,
+					error = responseErr,
+				}, "error")
 				WEP:Print("Hide and Seek response failed:", responseErr)
 				return
 			end
@@ -1130,8 +1219,16 @@ function HideSeek:OnInviteRequest(request)
 				self:AddPlayer(host, false)
 				self:AddPlayer(Player.GetFullName(), false)
 				WEP:Print("Joined Hide and Seek lobby hosted by", host .. ".")
+				WEP:Log("HideSeek", "invite_accepted", {
+					host = host,
+					gameId = self.gameId,
+				})
 				self:RefreshWindow()
 			else
+				WEP:Log("HideSeek", "invite_declined", {
+					host = host,
+					gameId = data.g,
+				})
 				WEP:Print("Declined Hide and Seek invite from", host .. ".")
 			end
 		end,
@@ -1145,10 +1242,19 @@ function HideSeek:OnInviteResponse(response)
 	local requestData = request and request.data or {}
 
 	if not request or requestData.g ~= self.gameId then
+		WEP:Log("HideSeek", "invite_response_ignored", {
+			sender = response.sender,
+			reason = "unknown request or game",
+		}, "warn")
 		return
 	end
 
 	if request.target and not namesMatch(response.sender, request.target) then
+		WEP:Log("HideSeek", "invite_response_ignored", {
+			sender = response.sender,
+			target = request.target,
+			reason = "sender mismatch",
+		}, "warn")
 		return
 	end
 
@@ -1160,12 +1266,20 @@ function HideSeek:OnInviteResponse(response)
 
 		self:AddPlayer(playerName, false)
 		WEP:Print(playerName, "joined Hide and Seek.")
+		WEP:Log("HideSeek", "invite_response_accepted", {
+			player = playerName,
+			gameId = self.gameId,
+		})
 		self:BroadcastState()
 		return
 	end
 
 	if response.status == "declined" then
 		WEP:Print(response.sender, "declined Hide and Seek.")
+		WEP:Log("HideSeek", "invite_response_declined", {
+			player = response.sender,
+			gameId = self.gameId,
+		})
 		self:RefreshWindow()
 	end
 end
@@ -1176,7 +1290,18 @@ function HideSeek:Broadcast(messageType, payload)
 	})
 
 	if not ok then
+		WEP:Log("HideSeek", "broadcast_failed", {
+			type = messageType,
+			gameId = payload and payload.g or self.gameId or "none",
+			error = messageIdOrErr,
+		}, "error")
 		WEP:Print("Hide and Seek message failed:", messageIdOrErr)
+	else
+		WEP:Log("HideSeek", "broadcast_sent", {
+			type = messageType,
+			gameId = payload and payload.g or self.gameId or "none",
+			messageId = messageIdOrErr,
+		})
 	end
 
 	return ok, messageIdOrErr
@@ -1184,6 +1309,9 @@ end
 
 function HideSeek:BroadcastState()
 	if not self.gameId then
+		WEP:Log("HideSeek", "broadcast_state_skipped", {
+			reason = "no game id",
+		}, "warn")
 		return false
 	end
 
@@ -1235,16 +1363,30 @@ function HideSeek:OnStateMessage(message)
 	local payload = message.payload or {}
 
 	if isBlank(payload.g) then
+		WEP:Log("HideSeek", "state_message_ignored", {
+			sender = message.sender,
+			reason = "missing game id",
+		}, "warn")
 		return
 	end
 
 	local isKnownGame = self.gameId and payload.g == self.gameId
 	if not isKnownGame then
+		WEP:Log("HideSeek", "state_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g,
+			reason = "unknown game",
+		}, "warn")
 		return
 	end
 
 	local expectedHost = not isBlank(self.host) and self.host or payload.h
 	if not self:IsMessageFromHost(message, expectedHost) then
+		WEP:Log("HideSeek", "state_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g,
+			reason = "not host",
+		}, "warn")
 		return
 	end
 
@@ -1256,12 +1398,22 @@ function HideSeek:OnStateMessage(message)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self:ResetRoster()
 	self:RefreshWindow()
+	WEP:Log("HideSeek", "state_message_applied", {
+		gameId = self.gameId,
+		status = self.status,
+		host = self.host,
+	})
 end
 
 function HideSeek:OnRosterMessage(message)
 	local payload = message.payload or {}
 
 	if payload.g ~= self.gameId or not self:IsMessageFromHost(message) then
+		WEP:Log("HideSeek", "roster_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or host mismatch",
+		}, "warn")
 		return
 	end
 
@@ -1274,6 +1426,11 @@ function HideSeek:OnRosterMessage(message)
 	end
 
 	self:RefreshWindow()
+	WEP:Log("HideSeek", "roster_message_applied", {
+		gameId = self.gameId,
+		player = payload.p or "none",
+		count = self:GetPlayerCount(),
+	})
 end
 
 function HideSeek:PickRandomSeeker()
@@ -1302,6 +1459,12 @@ function HideSeek:PickRandomSeeker()
 end
 
 function HideSeek:StartGame()
+	WEP:Log("HideSeek", "start_requested", {
+		gameId = self.gameId or "none",
+		status = self.status or "none",
+		players = self:GetPlayerCount(),
+	})
+
 	if not self:EnsureHostLobby() then
 		return
 	end
@@ -1309,6 +1472,11 @@ function HideSeek:StartGame()
 	self:ReadWindowSettings()
 
 	if self:GetPlayerCount() < 2 then
+		WEP:Log("HideSeek", "start_failed", {
+			gameId = self.gameId or "none",
+			error = "not enough players",
+			players = self:GetPlayerCount(),
+		}, "warn")
 		WEP:Print("Hide and Seek needs at least 2 players.")
 		self:ShowMenu()
 		return
@@ -1316,12 +1484,22 @@ function HideSeek:StartGame()
 
 	local seeker = self:PickRandomSeeker()
 	if not seeker then
+		WEP:Log("HideSeek", "start_failed", {
+			gameId = self.gameId or "none",
+			error = "could not choose seeker",
+		}, "error")
 		WEP:Print("Could not choose a seeker.")
 		return
 	end
 
 	self.seeker = seeker
 	self:ClearFound()
+	WEP:Log("HideSeek", "started", {
+		gameId = self.gameId,
+		seeker = seeker,
+		hideSeconds = self.hideSeconds,
+		seekSeconds = self.seekSeconds,
+	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, Timer.Now())
 	self:BroadcastState()
 	self:Broadcast(MSG_START, {
@@ -1337,6 +1515,11 @@ function HideSeek:OnStartMessage(message)
 	local payload = message.payload or {}
 
 	if payload.g ~= self.gameId or not self:IsMessageFromHost(message) then
+		WEP:Log("HideSeek", "start_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or host mismatch",
+		}, "warn")
 		return
 	end
 
@@ -1344,6 +1527,10 @@ function HideSeek:OnStartMessage(message)
 	self.hideSeconds = clamp(payload.hs, MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self:ClearFound()
+	WEP:Log("HideSeek", "start_message_applied", {
+		gameId = self.gameId,
+		seeker = self.seeker or "none",
+	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, tonumber(payload.t) or Timer.Now())
 end
 
@@ -1360,6 +1547,14 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 	if remaining < 0 then
 		remaining = 0
 	end
+
+	WEP:Log("HideSeek", "hiding_started", {
+		gameId = self.gameId or "none",
+		seeker = self.seeker or "none",
+		hideSeconds = hideSeconds,
+		seekSeconds = seekSeconds,
+		remaining = remaining,
+	})
 
 	if self:IsSeeker() then
 		ScreenOverlay.SetBlackoutPercentage(100)
@@ -1381,6 +1576,10 @@ end
 
 function HideSeek:BeginSeeking()
 	if self.status ~= STATUS_HIDING and self.status ~= STATUS_SEEKING then
+		WEP:Log("HideSeek", "seeking_start_skipped", {
+			gameId = self.gameId or "none",
+			status = self.status or "none",
+		}, "warn")
 		return
 	end
 
@@ -1391,6 +1590,11 @@ function HideSeek:BeginSeeking()
 	local token = self.timerToken
 
 	self:HideCountdown()
+	WEP:Log("HideSeek", "seeking_started", {
+		gameId = self.gameId or "none",
+		seeker = self.seeker or "none",
+		seekSeconds = self.seekSeconds,
+	})
 
 	if self:IsSeeker() then
 		ScreenOverlay.HideBlackout()
@@ -1412,6 +1616,9 @@ end
 function HideSeek:ShowCountdown(seconds, startedAt, onComplete)
 	local frame = ensureCountdownFrame()
 	if not frame then
+		WEP:Log("HideSeek", "countdown_unavailable", {
+			seconds = seconds,
+		}, "error")
 		return false
 	end
 
@@ -1442,6 +1649,9 @@ function HideSeek:ShowCountdown(seconds, startedAt, onComplete)
 	end
 
 	update()
+	WEP:Log("HideSeek", "countdown_shown", {
+		seconds = seconds,
+	})
 	return true
 end
 
@@ -1450,6 +1660,7 @@ function HideSeek:HideCountdown()
 
 	if countdownFrame then
 		countdownFrame:Hide()
+		WEP:Log("HideSeek", "countdown_hidden")
 	end
 end
 
@@ -1459,6 +1670,10 @@ function HideSeek:HideSeekerUI()
 	for _, groupName in ipairs(SEEKER_UI_GROUPS) do
 		UIVisibility.Hide(groupName)
 	end
+
+	WEP:Log("HideSeek", "seeker_ui_hidden", {
+		groups = #SEEKER_UI_GROUPS,
+	})
 end
 
 function HideSeek:RestoreSeekerUI()
@@ -1471,6 +1686,10 @@ function HideSeek:RestoreSeekerUI()
 	for _, groupName in ipairs(SEEKER_UI_GROUPS) do
 		UIVisibility.Show(groupName)
 	end
+
+	WEP:Log("HideSeek", "seeker_ui_restored", {
+		groups = #SEEKER_UI_GROUPS,
+	})
 end
 
 function HideSeek:GetTargetPlayerName()
@@ -1504,6 +1723,11 @@ function HideSeek:OnTargetChanged()
 		return
 	end
 
+	WEP:Log("HideSeek", "target_changed", {
+		target = targetName,
+		gameId = self.gameId or "none",
+	})
+
 	local player = self:GetPlayer(targetName)
 	if not player or player.found or namesMatch(player.name, self.seeker) then
 		return
@@ -1521,6 +1745,12 @@ function HideSeek:MarkFound(playerName, foundBy, broadcast)
 	player.found = true
 	WEP:Print(player.name, "was found by", foundBy or self.seeker or "the seeker")
 	playSound("ui_select")
+	WEP:Log("HideSeek", "player_found", {
+		gameId = self.gameId or "none",
+		player = player.name,
+		foundBy = foundBy or self.seeker or "unknown",
+		broadcast = broadcast == true,
+	})
 
 	if broadcast then
 		self:Broadcast(MSG_FOUND, {
@@ -1542,9 +1772,19 @@ function HideSeek:OnFoundMessage(message)
 	local payload = message.payload or {}
 
 	if payload.g ~= self.gameId or self.status ~= STATUS_SEEKING or not self:IsMessageFromSeeker(message) then
+		WEP:Log("HideSeek", "found_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "state or seeker mismatch",
+		}, "warn")
 		return
 	end
 
+	WEP:Log("HideSeek", "found_message_received", {
+		sender = message.sender,
+		player = payload.p or "none",
+		gameId = self.gameId,
+	})
 	self:MarkFound(payload.p, message.sender, false)
 
 	if payload.p and isSelfName(payload.p) then
@@ -1554,6 +1794,9 @@ end
 
 function HideSeek:FinishGame(reason, broadcast)
 	if not self.gameId then
+		WEP:Log("HideSeek", "finish_skipped", {
+			reason = "no game id",
+		}, "warn")
 		return
 	end
 
@@ -1565,6 +1808,11 @@ function HideSeek:FinishGame(reason, broadcast)
 	self:RestoreSeekerUI()
 	self.hideEndsAt = nil
 	self.seekEndsAt = nil
+	WEP:Log("HideSeek", "finished", {
+		gameId = self.gameId,
+		reason = self.resultReason,
+		broadcast = broadcast == true,
+	})
 
 	if reason == "found" then
 		WEP:Print("Hide and Seek ended: seeker wins.")
@@ -1588,20 +1836,37 @@ function HideSeek:OnEndMessage(message)
 	local payload = message.payload or {}
 
 	if payload.g ~= self.gameId or not self:IsMessageFromHost(message) then
+		WEP:Log("HideSeek", "end_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or host mismatch",
+		}, "warn")
 		return
 	end
 
+	WEP:Log("HideSeek", "end_message_received", {
+		sender = message.sender,
+		gameId = self.gameId,
+		reason = payload.r or "ended",
+	})
 	self:FinishGame(payload.r or "ended", false)
 end
 
 function HideSeek:LeaveGame()
 	if not self.gameId then
+		WEP:Log("HideSeek", "leave_skipped", {
+			reason = "no game",
+		}, "warn")
 		WEP:Print("You are not in a Hide and Seek game.")
 		return
 	end
 
 	local wasHost = self:IsHost()
 	local gameId = self.gameId
+	WEP:Log("HideSeek", "leave_requested", {
+		gameId = gameId,
+		wasHost = wasHost,
+	})
 
 	if wasHost then
 		self:Broadcast(MSG_END, {
@@ -1617,17 +1882,31 @@ function HideSeek:LeaveGame()
 
 	self:ResetGame()
 	WEP:Print("Left Hide and Seek.")
+	WEP:Log("HideSeek", "left_game", {
+		gameId = gameId,
+		wasHost = wasHost,
+	})
 end
 
 function HideSeek:OnLeaveMessage(message)
 	local payload = message.payload or {}
 
 	if payload.g ~= self.gameId or not self:IsHost() then
+		WEP:Log("HideSeek", "leave_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			reason = "game or host mismatch",
+		}, "warn")
 		return
 	end
 
 	local playerName = payload.p or message.sender
 	if not messageSentBy(message, playerName) or not self:GetPlayer(playerName) then
+		WEP:Log("HideSeek", "leave_message_ignored", {
+			sender = message.sender,
+			player = playerName or "none",
+			reason = "sender or player mismatch",
+		}, "warn")
 		return
 	end
 
@@ -1636,6 +1915,10 @@ function HideSeek:OnLeaveMessage(message)
 	if self.status == STATUS_LOBBY or self.status == STATUS_ENDED then
 		if self:RemovePlayer(playerName) then
 			WEP:Print(playerName, "left Hide and Seek.")
+			WEP:Log("HideSeek", "player_left_lobby", {
+				gameId = self.gameId,
+				player = playerName,
+			})
 			self:BroadcastState()
 		end
 		return
@@ -1643,6 +1926,10 @@ function HideSeek:OnLeaveMessage(message)
 
 	if self:RemovePlayer(playerName) then
 		WEP:Print(playerName, "left Hide and Seek.")
+		WEP:Log("HideSeek", "player_left_game", {
+			gameId = self.gameId,
+			player = playerName,
+		})
 	end
 
 	if playerWasSeeker then
@@ -1657,6 +1944,7 @@ function HideSeek:OnLeaveMessage(message)
 end
 
 function HideSeek:ResetGame()
+	local previousGameId = self.gameId
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
@@ -1670,6 +1958,9 @@ function HideSeek:ResetGame()
 	self.timerToken = (self.timerToken or 0) + 1
 	self:ResetRoster()
 	self:RefreshWindow()
+	WEP:Log("HideSeek", "reset", {
+		gameId = previousGameId or "none",
+	})
 end
 
 function HideSeek:PrintStatus()
@@ -1680,6 +1971,11 @@ function HideSeek:PrintStatus()
 end
 
 function HideSeek:OnDisabled()
+	WEP:Log("HideSeek", "disabled", {
+		gameId = self.gameId or "none",
+		status = self.status or "none",
+	})
+
 	if self.gameId then
 		self:LeaveGame()
 	else
@@ -1695,11 +1991,19 @@ end
 
 function HideSeek:HandleSlash(args)
 	if not self:IsEnabled() then
+		WEP:Log("HideSeek", "slash_blocked_disabled", {
+			action = args and args[2] or "none",
+		}, "warn")
 		WEP:Print("Hide and Seek is disabled. Open /wep to enable it.")
 		return
 	end
 
 	local action = args[2]
+	WEP:Log("HideSeek", "slash", {
+		action = action or "menu",
+		status = self.status or "none",
+		gameId = self.gameId or "none",
+	})
 
 	if not action or action == "menu" then
 		self:ShowMenu()

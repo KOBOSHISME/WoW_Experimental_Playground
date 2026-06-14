@@ -8,6 +8,8 @@ local Dialog = {
 
 WEP.Tools.Dialog = Dialog
 
+WEP:Log("Dialog", "loaded")
+
 local DIALOG_FRAME_NAME = "WEPDialogFrame"
 local DEFAULT_TITLE = "WoW Experimental Playground"
 local DEFAULT_WIDTH = 360
@@ -134,6 +136,10 @@ local function callResultHandler(request, result)
 
 	local ok, err = pcall(request.onSelect, result)
 	if not ok then
+		WEP:Log("Dialog", "result_handler_failed", {
+			id = result and result.id or "unknown",
+			error = err,
+		}, "error")
 		WEP:Print("Dialog result handler failed:", err)
 	end
 end
@@ -145,6 +151,12 @@ local function finishDialog(option, canceled, reason)
 	end
 
 	Dialog.active = nil
+	WEP:Log("Dialog", "finished", {
+		id = request.id,
+		canceled = canceled == true,
+		reason = reason or "none",
+		value = option and option.value or request.cancelValue or "none",
+	})
 
 	local result = {
 		id = request.id,
@@ -196,6 +208,7 @@ local function ensureDialogFrame()
 	end
 
 	if not CreateFrame or not UIParent then
+		WEP:Log("Dialog", "frame_unavailable", nil, "error")
 		return nil
 	end
 
@@ -266,6 +279,7 @@ local function ensureDialogFrame()
 	end
 
 	dialogFrame = frame
+	WEP:Log("Dialog", "frame_created")
 	return dialogFrame
 end
 
@@ -306,20 +320,34 @@ end
 
 function Dialog.Show(config)
 	if type(config) ~= "table" then
+		WEP:Log("Dialog", "show_failed", {
+			error = "dialog config is required",
+		}, "error")
 		return false, "dialog config is required"
 	end
 
 	local options, optionsErr = normalizeOptions(config.options)
 	if not options then
+		WEP:Log("Dialog", "show_failed", {
+			title = config.title or DEFAULT_TITLE,
+			error = optionsErr,
+		}, "error")
 		return false, optionsErr
 	end
 
 	local frame = ensureDialogFrame()
 	if not frame then
+		WEP:Log("Dialog", "show_failed", {
+			title = config.title or DEFAULT_TITLE,
+			error = "dialog frame is unavailable",
+		}, "error")
 		return false, "dialog frame is unavailable"
 	end
 
 	if Dialog.active then
+		WEP:Log("Dialog", "replacing_active", {
+			activeId = Dialog.active.id,
+		}, "warn")
 		Dialog.Hide("replaced")
 	end
 
@@ -336,6 +364,11 @@ function Dialog.Show(config)
 	Dialog.active = request
 	layoutFrame(frame, request)
 	frame:Show()
+	WEP:Log("Dialog", "shown", {
+		id = request.id,
+		title = request.title,
+		options = #request.options,
+	})
 
 	return true, request.id
 end
@@ -343,22 +376,44 @@ end
 function Dialog.Select(index)
 	local request = Dialog.active
 	if not request then
+		WEP:Log("Dialog", "select_failed", {
+			index = index,
+			error = "no active dialog",
+		}, "error")
 		return false, "no active dialog"
 	end
 
 	local option = request.options[tonumber(index) or 0]
 	if not option then
+		WEP:Log("Dialog", "select_failed", {
+			id = request.id,
+			index = index,
+			error = "unknown option",
+		}, "error")
 		return false, "unknown dialog option: " .. tostring(index)
 	end
 
+	WEP:Log("Dialog", "selected", {
+		id = request.id,
+		index = index,
+		value = option.value,
+	})
 	return true, finishDialog(option, false, "selected")
 end
 
 function Dialog.Hide(reason)
 	if not Dialog.active then
+		WEP:Log("Dialog", "hide_failed", {
+			reason = reason or "canceled",
+			error = "no active dialog",
+		}, "error")
 		return false, "no active dialog"
 	end
 
+	WEP:Log("Dialog", "hide_requested", {
+		id = Dialog.active.id,
+		reason = reason or "canceled",
+	})
 	return true, finishDialog(nil, true, reason or "canceled")
 end
 

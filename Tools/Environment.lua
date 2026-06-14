@@ -5,6 +5,8 @@ WEP.Tools = WEP.Tools or {}
 local Environment = {}
 WEP.Tools.Environment = Environment
 
+WEP:Log("Environment", "loaded")
+
 local DEFAULT_NAMEPLATE_LIMIT = 40
 local DEFAULT_BOSS_LIMIT = 5
 local DEFAULT_PARTY_LIMIT = 4
@@ -309,7 +311,7 @@ function Environment.GetUnits(options)
 end
 
 function Environment.GetSnapshot(options)
-	return {
+	local snapshot = {
 		capturedAt = WEP.Tools.Timer.Now(),
 		location = Environment.GetLocation(),
 		player = Environment.GetUnit("player"),
@@ -318,10 +320,24 @@ function Environment.GetSnapshot(options)
 		focus = Environment.GetUnit("focus"),
 		units = Environment.GetUnits(options),
 	}
+
+	WEP:Log("Environment", "snapshot_captured", {
+		mapId = snapshot.location and snapshot.location.mapId or "none",
+		unitCount = #snapshot.units,
+		hasTarget = snapshot.target ~= nil,
+	})
+
+	return snapshot
 end
 
 function Environment.GetStatus(options)
 	local snapshot = Environment.GetSnapshot(options)
+	WEP:Log("Environment", "status_captured", {
+		unitCount = #snapshot.units,
+		hasTarget = snapshot.target ~= nil,
+		hasMouseover = snapshot.mouseover ~= nil,
+		hasFocus = snapshot.focus ~= nil,
+	})
 
 	return {
 		location = snapshot.location,

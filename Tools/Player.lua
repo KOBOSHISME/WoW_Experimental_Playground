@@ -7,6 +7,8 @@ WEP.Tools.Player = Player
 
 local Text = WEP.Utils.Text
 
+WEP:Log("Player", "loaded")
+
 function Player.NormalizeName(name)
 	return Text.RemoveWhitespace(name)
 end
@@ -29,6 +31,7 @@ function Player.GetShortName()
 		end
 	end
 
+	WEP:Log("Player", "short_name_fallback", nil, "warn")
 	return "Unknown"
 end
 
@@ -47,6 +50,7 @@ function Player.GetRealmToken()
 		end
 	end
 
+	WEP:Log("Player", "realm_fallback", nil, "warn")
 	return "UnknownRealm"
 end
 

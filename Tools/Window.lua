@@ -5,6 +5,8 @@ WEP.Tools = WEP.Tools or {}
 local Window = {}
 WEP.Tools.Window = Window
 
+WEP:Log("Window", "loaded")
+
 local DEFAULT_WIDTH = 420
 local DEFAULT_HEIGHT = 360
 local MIN_WIDTH = 240
@@ -67,6 +69,9 @@ function Window.Create(config)
 	end
 
 	if not CreateFrame or not UIParent then
+		WEP:Log("Window", "create_failed", {
+			error = "window frame is unavailable",
+		}, "error")
 		return nil, "window frame is unavailable"
 	end
 
@@ -129,14 +134,26 @@ function Window.Create(config)
 
 	function controller:SetTitle(title)
 		frame.title:SetText(title or "")
+		WEP:Log("Window", "title_set", {
+			name = name,
+			title = title or "",
+		})
 	end
 
 	function controller:SetSize(newWidth, newHeight)
 		frame:SetSize(clamp(newWidth, MIN_WIDTH, DEFAULT_WIDTH), clamp(newHeight, MIN_HEIGHT, DEFAULT_HEIGHT))
+		WEP:Log("Window", "size_set", {
+			name = name,
+			width = newWidth,
+			height = newHeight,
+		})
 	end
 
 	function controller:Show()
 		frame:Show()
+		WEP:Log("Window", "show", {
+			name = name,
+		})
 
 		if type(config.onShow) == "function" then
 			config.onShow(self)
@@ -145,6 +162,9 @@ function Window.Create(config)
 
 	function controller:Hide()
 		frame:Hide()
+		WEP:Log("Window", "hide", {
+			name = name,
+		})
 	end
 
 	function controller:Toggle()
@@ -162,6 +182,13 @@ function Window.Create(config)
 	if UISpecialFrames and name then
 		UISpecialFrames[#UISpecialFrames + 1] = name
 	end
+
+	WEP:Log("Window", "created", {
+		name = name,
+		title = config.title or "Window",
+		width = width,
+		height = height,
+	})
 
 	return controller
 end

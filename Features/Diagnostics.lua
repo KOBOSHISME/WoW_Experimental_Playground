@@ -23,12 +23,15 @@ local function formatOnOff(value)
 	return value and "on" or "off"
 end
 
+WEP:Log("Diagnostics", "loaded")
+
 function Diagnostics:Initialize()
 	if self.initialized then
 		return
 	end
 
 	self.initialized = true
+	WEP:Log("Diagnostics", "initialize")
 
 	WEP.Comm:RegisterHandler("PING", function(message)
 		self:OnPing(message)
@@ -46,6 +49,9 @@ end
 
 function Diagnostics:HandleSlash(input)
 	local args = splitCommand(input)
+	WEP:Log("Diagnostics", "slash", {
+		input = input or "",
+	})
 
 	if not args[1] then
 		self:ShowDefaultUI()
@@ -54,6 +60,11 @@ function Diagnostics:HandleSlash(input)
 
 	if args[1] == "help" then
 		self:PrintHelp()
+		return
+	end
+
+	if args[1] == "logs" or args[1] == "log" then
+		self:HandleLogs(args)
 		return
 	end
 
@@ -116,6 +127,8 @@ function Diagnostics:HandleSlash(input)
 end
 
 function Diagnostics:ShowDefaultUI()
+	WEP:Log("Diagnostics", "show_default_ui")
+
 	if WEP.FeaturePanel and WEP.FeaturePanel.ShowWindow then
 		WEP.FeaturePanel:ShowWindow()
 	else
@@ -126,6 +139,9 @@ end
 function Diagnostics.PrintHelp()
 	WEP:Print("Commands:")
 	WEP:Print("/wep - Open the feature panel.")
+	WEP:Print("/wep logs [limit] - Show recent WEP logs.")
+	WEP:Print("/wep logs clear - Clear saved WEP logs.")
+	WEP:Print("/wep logs echo on|off - Print new log entries to chat.")
 	WEP:Print("/wep comm status - Show communication status.")
 	WEP:Print("/wep comm ping - Send a hidden discovery ping.")
 	WEP:Print("/wep comm debug [on|off] - Toggle communication debug messages.")
@@ -133,8 +149,53 @@ function Diagnostics.PrintHelp()
 	WEP:Print("/wep tools help - Show tool debug commands.")
 end
 
+function Diagnostics:HandleLogs(args)
+	local action = args[2]
+
+	if action == "clear" then
+		local count = WEP:ClearLogs()
+		WEP:Print("Cleared WEP logs:", count)
+		return
+	end
+
+	if action == "echo" then
+		WEP.db.log = WEP.db.log or {}
+
+		if args[3] == "on" then
+			WEP.db.log.echo = true
+		elseif args[3] == "off" then
+			WEP.db.log.echo = false
+		else
+			WEP.db.log.echo = not WEP.db.log.echo
+		end
+
+		WEP:Log("Diagnostics", "log_echo_toggled", {
+			enabled = WEP.db.log.echo == true,
+		})
+		WEP:Print("Log echo:", formatOnOff(WEP.db.log.echo == true))
+		return
+	end
+
+	local limit = tonumber(action) or 10
+	if limit < 1 then
+		limit = 1
+	end
+
+	local logs = WEP:GetLogs(limit)
+	WEP:Print("Recent WEP logs:", #logs)
+
+	for _, entry in ipairs(logs) do
+		WEP:Print(WEP:FormatLogEntry(entry))
+	end
+end
+
 function Diagnostics.PrintStatus()
 	local status = WEP.Comm:GetStatus()
+	WEP:Log("Diagnostics", "comm_status", {
+		activeChannel = status.activeChannel or "none",
+		enabled = status.enabled,
+		queueSize = status.queueSize,
+	})
 
 	WEP:Print("Comm enabled:", formatOnOff(status.enabled), "debug:", formatOnOff(status.debug))
 	WEP:Print("Discovery channel:", formatOnOff(status.discoveryChannel), "active:", status.activeChannel or "none")
@@ -177,10 +238,15 @@ function Diagnostics.ToggleDebug(_, value)
 		WEP.db.comm.debug = not WEP.db.comm.debug
 	end
 
+	WEP:Log("Diagnostics", "comm_debug_toggled", {
+		enabled = WEP.db.comm.debug,
+	})
 	WEP:Print("Comm debug:", formatOnOff(WEP.db.comm.debug))
 end
 
 function Diagnostics:SendPing()
+	WEP:Log("Diagnostics", "ping_send_start")
+
 	local ok, messageIdOrErr = WEP.Comm:Send("PING", {
 		source = "slash",
 	}, {
@@ -188,6 +254,9 @@ function Diagnostics:SendPing()
 	})
 
 	if not ok then
+		WEP:Log("Diagnostics", "ping_send_failed", {
+			error = messageIdOrErr,
+		}, "error")
 		WEP:Print("PING failed:", messageIdOrErr)
 		return
 	end
@@ -198,12 +267,18 @@ function Diagnostics:SendPing()
 	}
 
 	WEP:Print("PING queued on hidden discovery channel.")
+	WEP:Log("Diagnostics", "ping_queued", {
+		messageId = messageIdOrErr,
+	})
 
 	Timer.After(5, function()
 		local pendingPing = self.pendingPings[messageIdOrErr]
 
 		if pendingPing then
 			if pendingPing.responses == 0 then
+				WEP:Log("Diagnostics", "ping_no_responses", {
+					messageId = messageIdOrErr,
+				}, "warn")
 				WEP:Print("No PONG responses received.")
 			end
 
@@ -214,6 +289,10 @@ end
 
 function Diagnostics.OnPing(_, message)
 	WEP:Debug("PING from", message.sender, "via", message.transport)
+	WEP:Log("Diagnostics", "ping_received", {
+		sender = message.sender,
+		transport = message.transport,
+	})
 
 	local delay = 0.2 + (math.random() * 0.8)
 
@@ -232,12 +311,21 @@ function Diagnostics:OnPong(message)
 
 	if not replyTo or not self.pendingPings[replyTo] then
 		WEP:Debug("Unmatched PONG from", message.sender)
+		WEP:Log("Diagnostics", "pong_unmatched", {
+			sender = message.sender,
+			replyTo = replyTo or "none",
+		}, "warn")
 		return
 	end
 
 	local pendingPing = self.pendingPings[replyTo]
 	pendingPing.responses = pendingPing.responses + 1
 
+	WEP:Log("Diagnostics", "pong_received", {
+		sender = message.sender,
+		replyTo = replyTo,
+		responses = pendingPing.responses,
+	})
 	WEP:Print("PONG from", message.sender, "via", message.transport)
 end
 

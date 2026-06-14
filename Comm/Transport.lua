@@ -17,6 +17,8 @@ local Comm = {
 
 WEP.Comm = Comm
 
+WEP:Log("Comm", "loaded")
+
 local ADDON_PREFIX = "WEPXP"
 local DISCOVERY_FALLBACK_CHANNEL = "wepcomm"
 local MAX_QUEUE_SIZE = 50
@@ -61,6 +63,11 @@ function Comm:Initialize()
 	end
 
 	self.initialized = true
+	WEP:Log("Comm", "initialize", {
+		enabled = WEP.db.comm.enabled,
+		discoveryChannel = WEP.db.comm.discoveryChannel,
+		addonMessages = WEP.db.comm.addonMessages,
+	})
 	self.frame = CreateFrame("Frame")
 	self.frame:SetScript("OnEvent", function(_, event, ...)
 		self:OnEvent(event, ...)
@@ -115,6 +122,9 @@ end
 function Comm:RegisterAddonPrefix()
 	if not WEP.db.comm.addonMessages then
 		self.addonPrefixRegistered = false
+		WEP:Log("Comm", "addon_prefix_skipped", {
+			reason = "addon messages disabled",
+		})
 		return
 	end
 
@@ -126,6 +136,12 @@ function Comm:RegisterAddonPrefix()
 		self.addonPrefixRegistered = false
 		self.lastError = "addon message API unavailable"
 	end
+
+	WEP:Log("Comm", "addon_prefix_registered", {
+		prefix = ADDON_PREFIX,
+		registered = self.addonPrefixRegistered == true,
+		error = self.lastError or "none",
+	}, self.addonPrefixRegistered and "info" or "warn")
 end
 
 function Comm:CleanupOldDiscoveryChannels()
@@ -172,11 +188,18 @@ end
 
 function Comm:JoinDiscoveryChannels()
 	if not WEP.db.comm.enabled or not WEP.db.comm.discoveryChannel then
+		WEP:Log("Comm", "join_discovery_skipped", {
+			enabled = WEP.db.comm.enabled,
+			discoveryChannel = WEP.db.comm.discoveryChannel,
+		}, "warn")
 		return
 	end
 
 	if not JoinChannelByName then
 		self.lastError = "channel API unavailable"
+		WEP:Log("Comm", "join_discovery_failed", {
+			error = self.lastError,
+		}, "error")
 		return
 	end
 
@@ -191,6 +214,10 @@ function Comm:JoinDiscoveryChannels()
 		end
 	end
 
+	WEP:Log("Comm", "join_discovery_requested", {
+		channels = #self.channelNames,
+	})
+
 	Timer.After(1, function()
 		self:RefreshJoinedChannels()
 		self:HideDiscoveryChannels()
@@ -198,6 +225,11 @@ function Comm:JoinDiscoveryChannels()
 		if not self.activeChannel then
 			self.lastError = "no discovery channel joined"
 		end
+
+		WEP:Log("Comm", "join_discovery_checked", {
+			activeChannel = self.activeChannel or "none",
+			error = self.lastError or "none",
+		}, self.activeChannel and "info" or "warn")
 	end)
 end
 
@@ -217,6 +249,10 @@ function Comm:RegisterHandler(messageType, callback)
 
 	self.handlers[messageType] = self.handlers[messageType] or {}
 	self.handlers[messageType][#self.handlers[messageType] + 1] = callback
+	WEP:Log("Comm", "handler_registered", {
+		type = messageType,
+		count = #self.handlers[messageType],
+	})
 
 	return true
 end
@@ -230,6 +266,10 @@ function Comm:Send(messageType, payload, options)
 	options = options or {}
 
 	if not WEP.db.comm.enabled then
+		WEP:Log("Comm", "send_failed", {
+			type = messageType,
+			error = "communication is disabled",
+		}, "warn")
 		return false, "communication is disabled"
 	end
 
@@ -241,23 +281,48 @@ function Comm:Send(messageType, payload, options)
 	end
 
 	if transport ~= "CHANNEL" and transport ~= "ADDON" then
+		WEP:Log("Comm", "send_failed", {
+			type = messageType,
+			transport = transport or "none",
+			error = "unsupported transport",
+		}, "error")
 		return false, "unsupported transport"
 	end
 
 	if transport == "CHANNEL" and not WEP.db.comm.discoveryChannel then
+		WEP:Log("Comm", "send_failed", {
+			type = messageType,
+			transport = transport,
+			error = "discovery channel is disabled",
+		}, "warn")
 		return false, "discovery channel is disabled"
 	end
 
 	if transport == "ADDON" then
 		if not WEP.db.comm.addonMessages then
+			WEP:Log("Comm", "send_failed", {
+				type = messageType,
+				transport = transport,
+				error = "addon messages are disabled",
+			}, "warn")
 			return false, "addon messages are disabled"
 		end
 
 		if not VALID_ADDON_DISTRIBUTIONS[distribution or ""] then
+			WEP:Log("Comm", "send_failed", {
+				type = messageType,
+				distribution = distribution or "none",
+				error = "unsupported addon distribution",
+			}, "error")
 			return false, "unsupported addon distribution"
 		end
 
 		if distribution == "WHISPER" and (not options.target or options.target == "") then
+			WEP:Log("Comm", "send_failed", {
+				type = messageType,
+				distribution = distribution,
+				error = "whisper target is required",
+			}, "error")
 			return false, "whisper target is required"
 		end
 	end
@@ -266,11 +331,21 @@ function Comm:Send(messageType, payload, options)
 	local wireText, encodeErr = WEP.Protocol:Encode(messageType, payload, messageId, Player.GetFullName(), Timer.Now())
 
 	if not wireText then
+		WEP:Log("Comm", "send_failed", {
+			type = messageType,
+			messageId = messageId,
+			error = encodeErr,
+		}, "error")
 		return false, encodeErr
 	end
 
 	if #self.sendQueue >= MAX_QUEUE_SIZE then
 		self.stats.dropped = self.stats.dropped + 1
+		WEP:Log("Comm", "send_failed", {
+			type = messageType,
+			messageId = messageId,
+			error = "outgoing queue is full",
+		}, "error")
 		return false, "outgoing queue is full"
 	end
 
@@ -283,6 +358,12 @@ function Comm:Send(messageType, payload, options)
 	}
 
 	self:ScheduleQueue()
+	WEP:Log("Comm", "send_queued", {
+		type = messageType,
+		messageId = messageId,
+		transport = transport,
+		queueSize = #self.sendQueue,
+	})
 	return true, messageId
 end
 
@@ -322,6 +403,11 @@ function Comm:ProcessQueue()
 		else
 			self.stats.dropped = self.stats.dropped + 1
 			WEP:Debug("Dropped outgoing message:", err)
+			WEP:Log("Comm", "send_dropped", {
+				transport = item.transport,
+				error = err,
+				attempts = item.attempts,
+			}, "error")
 		end
 	end
 
@@ -359,10 +445,16 @@ function Comm:SendDiscoveryWire(item)
 
 	if not sentToAnyChannel then
 		self:JoinDiscoveryChannels()
+		WEP:Log("Comm", "discovery_send_failed", {
+			error = "no discovery channel joined",
+		}, "warn")
 		return false, "no discovery channel joined"
 	end
 
 	self.stats.sent = self.stats.sent + 1
+	WEP:Log("Comm", "discovery_sent", {
+		channels = #self.channelNames,
+	})
 	return true
 end
 
@@ -393,10 +485,19 @@ function Comm:SendAddonWire(item)
 	local ok, err = pcall(sendAddonMessage, ADDON_PREFIX, item.wireText, distribution, item.target)
 
 	if not ok then
+		WEP:Log("Comm", "addon_send_failed", {
+			distribution = distribution,
+			target = item.target or "none",
+			error = err,
+		}, "error")
 		return false, err
 	end
 
 	self.stats.sent = self.stats.sent + 1
+	WEP:Log("Comm", "addon_sent", {
+		distribution = distribution,
+		target = item.target or "none",
+	})
 	return true
 end
 
@@ -431,14 +532,29 @@ function Comm:HandleIncoming(wireText, apiSender, transport, channelName)
 
 	if not message then
 		WEP:Debug("Ignored incoming message:", decodeErr)
+		WEP:Log("Comm", "incoming_ignored", {
+			transport = transport,
+			sender = apiSender or "none",
+			error = decodeErr,
+		}, "warn")
 		return
 	end
 
 	if WEP:IsSelf(apiSender) or WEP:IsSelf(message.sender) then
+		WEP:Log("Comm", "incoming_ignored", {
+			type = message.type,
+			sender = apiSender or message.sender,
+			reason = "self",
+		})
 		return
 	end
 
 	if self:IsDuplicate(message.id) then
+		WEP:Log("Comm", "incoming_duplicate", {
+			type = message.type,
+			id = message.id,
+			sender = message.sender,
+		}, "warn")
 		return
 	end
 
@@ -451,6 +567,12 @@ function Comm:HandleIncoming(wireText, apiSender, transport, channelName)
 	message.receivedAt = Timer.Now()
 
 	self.stats.received = self.stats.received + 1
+	WEP:Log("Comm", "incoming_received", {
+		type = message.type,
+		id = message.id,
+		sender = message.sender,
+		transport = transport,
+	})
 	self:Dispatch(message)
 end
 
@@ -459,6 +581,10 @@ function Comm:Dispatch(message)
 
 	if not handlers then
 		WEP:Debug("No handler for message type:", message.type)
+		WEP:Log("Comm", "dispatch_no_handler", {
+			type = message.type,
+			sender = message.sender,
+		}, "warn")
 		return
 	end
 
@@ -466,6 +592,10 @@ function Comm:Dispatch(message)
 		local ok, err = pcall(callback, message)
 
 		if not ok then
+			WEP:Log("Comm", "dispatch_failed", {
+				type = message.type,
+				error = err,
+			}, "error")
 			WEP:Print("Comm handler failed:", message.type, err)
 		end
 	end

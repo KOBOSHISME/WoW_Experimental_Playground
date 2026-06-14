@@ -11,6 +11,8 @@ local UIVisibility = {
 
 WEP.Tools.UIVisibility = UIVisibility
 
+WEP:Log("UIVisibility", "loaded")
+
 local HIDDEN_PARENT_NAME = "WEPUIVisibilityHiddenParent"
 
 local hiddenParent
@@ -246,6 +248,7 @@ local function ensureHiddenParent()
 	end
 
 	if not CreateFrame or not UIParent then
+		WEP:Log("UIVisibility", "hidden_parent_unavailable", nil, "error")
 		return nil
 	end
 
@@ -300,6 +303,9 @@ local function queueOrRun(callback)
 	if isInCombat() then
 		UIVisibility.pendingOps[#UIVisibility.pendingOps + 1] = callback
 		ensureCombatWatcher()
+		WEP:Log("UIVisibility", "operation_queued", {
+			pending = #UIVisibility.pendingOps,
+		}, "warn")
 		return true, "queued"
 	end
 
@@ -521,6 +527,9 @@ function UIVisibility.ProcessQueue()
 
 	local pending = UIVisibility.pendingOps
 	UIVisibility.pendingOps = {}
+	WEP:Log("UIVisibility", "process_queue", {
+		count = #pending,
+	})
 
 	for _, callback in ipairs(pending) do
 		callback()
@@ -542,7 +551,8 @@ function UIVisibility.NormalizeGroup(group)
 end
 
 function UIVisibility.HideAll()
-	return queueOrRun(function()
+	WEP:Log("UIVisibility", "hide_all_requested")
+	local ok, state = queueOrRun(function()
 		if not UIParent or not UIParent.Hide then
 			return false, "UIParent is unavailable"
 		end
@@ -556,10 +566,16 @@ function UIVisibility.HideAll()
 
 		return true, "applied"
 	end)
+	WEP:Log("UIVisibility", "hide_all_result", {
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state
 end
 
 function UIVisibility.ShowAll()
-	return queueOrRun(function()
+	WEP:Log("UIVisibility", "show_all_requested")
+	local ok, state = queueOrRun(function()
 		if not UIParent or not UIParent.Show then
 			return false, "UIParent is unavailable"
 		end
@@ -573,9 +589,15 @@ function UIVisibility.ShowAll()
 
 		return true, "applied"
 	end)
+	WEP:Log("UIVisibility", "show_all_result", {
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state
 end
 
 function UIVisibility.ToggleAll()
+	WEP:Log("UIVisibility", "toggle_all_requested")
 	local uiParentHidden = UIVisibility.GetStatus().allHidden
 
 	if uiParentHidden then
@@ -589,32 +611,66 @@ function UIVisibility.Hide(group)
 	local groupName = normalizeGroup(group)
 
 	if not groupName then
+		WEP:Log("UIVisibility", "hide_group_failed", {
+			group = group,
+			error = "unknown group",
+		}, "error")
 		return false, "unknown UI group: " .. tostring(group)
 	end
 
-	return queueOrRun(function()
+	WEP:Log("UIVisibility", "hide_group_requested", {
+		group = groupName,
+	})
+	local ok, state, appliedGroupName = queueOrRun(function()
 		return hideGroup(groupName)
 	end)
+	WEP:Log("UIVisibility", "hide_group_result", {
+		group = appliedGroupName or groupName,
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state, appliedGroupName
 end
 
 function UIVisibility.Show(group)
 	local groupName = normalizeGroup(group)
 
 	if not groupName then
+		WEP:Log("UIVisibility", "show_group_failed", {
+			group = group,
+			error = "unknown group",
+		}, "error")
 		return false, "unknown UI group: " .. tostring(group)
 	end
 
-	return queueOrRun(function()
+	WEP:Log("UIVisibility", "show_group_requested", {
+		group = groupName,
+	})
+	local ok, state, appliedGroupName = queueOrRun(function()
 		return showGroup(groupName)
 	end)
+	WEP:Log("UIVisibility", "show_group_result", {
+		group = appliedGroupName or groupName,
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state, appliedGroupName
 end
 
 function UIVisibility.Toggle(group)
 	local groupName = normalizeGroup(group)
 
 	if not groupName then
+		WEP:Log("UIVisibility", "toggle_group_failed", {
+			group = group,
+			error = "unknown group",
+		}, "error")
 		return false, "unknown UI group: " .. tostring(group)
 	end
+
+	WEP:Log("UIVisibility", "toggle_group_requested", {
+		group = groupName,
+	})
 
 	if UIVisibility.groupStates[groupName] and UIVisibility.groupStates[groupName].hidden then
 		return UIVisibility.Show(groupName)
@@ -624,13 +680,19 @@ function UIVisibility.Toggle(group)
 end
 
 function UIVisibility.ShowEverythingManaged()
-	return queueOrRun(function()
+	WEP:Log("UIVisibility", "show_managed_requested")
+	local ok, state = queueOrRun(function()
 		for _, groupName in ipairs(GROUP_ORDER) do
 			showGroup(groupName)
 		end
 
 		return true, "applied"
 	end)
+	WEP:Log("UIVisibility", "show_managed_result", {
+		ok = ok == true,
+		state = state,
+	}, ok and "info" or "error")
+	return ok, state
 end
 
 function UIVisibility.GetStatus()

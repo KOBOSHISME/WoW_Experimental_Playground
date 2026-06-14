@@ -21,6 +21,8 @@ WEP.Tools.Requests = Requests
 local Timer = WEP.Tools.Timer
 local Player = WEP.Tools.Player
 
+WEP:Log("Requests", "loaded")
+
 local REQUEST_MESSAGE_TYPE = "REQ"
 local RESPONSE_MESSAGE_TYPE = "REQ_RES"
 local BROADCAST_TARGET = "*"
@@ -205,6 +207,10 @@ local function dispatch(handlersByType, requestType, event)
 		for _, callback in ipairs(callbacks) do
 			local ok, err = pcall(callback, event)
 			if not ok then
+				WEP:Log("Requests", "handler_failed", {
+					type = requestType,
+					error = err,
+				}, "error")
 				WEP:Print("Request handler failed:", requestType, err)
 			end
 		end
@@ -214,6 +220,10 @@ local function dispatch(handlersByType, requestType, event)
 		for _, callback in ipairs(wildcardCallbacks) do
 			local ok, err = pcall(callback, event)
 			if not ok then
+				WEP:Log("Requests", "handler_failed", {
+					type = requestType,
+					error = err,
+				}, "error")
 				WEP:Print("Request handler failed:", requestType, err)
 			end
 		end
@@ -226,6 +236,7 @@ function Requests:Initialize()
 	end
 
 	self.initialized = true
+	WEP:Log("Requests", "initialize")
 
 	WEP.Comm:RegisterHandler(REQUEST_MESSAGE_TYPE, function(message)
 		self:OnRequestMessage(message)
@@ -243,47 +254,85 @@ end
 
 function Requests.RegisterRequestHandler(requestType, callback)
 	if isBlank(requestType) then
+		WEP:Log("Requests", "request_handler_register_failed", {
+			error = "request type is required",
+		}, "error")
 		return false, "request type is required"
 	end
 
 	if type(callback) ~= "function" then
+		WEP:Log("Requests", "request_handler_register_failed", {
+			type = requestType,
+			error = "callback must be a function",
+		}, "error")
 		return false, "callback must be a function"
 	end
 
 	Requests.requestHandlers[requestType] = Requests.requestHandlers[requestType] or {}
 	Requests.requestHandlers[requestType][#Requests.requestHandlers[requestType] + 1] = callback
+	WEP:Log("Requests", "request_handler_registered", {
+		type = requestType,
+		count = #Requests.requestHandlers[requestType],
+	})
 
 	return true
 end
 
 function Requests.RegisterResponseHandler(requestType, callback)
 	if isBlank(requestType) then
+		WEP:Log("Requests", "response_handler_register_failed", {
+			error = "request type is required",
+		}, "error")
 		return false, "request type is required"
 	end
 
 	if type(callback) ~= "function" then
+		WEP:Log("Requests", "response_handler_register_failed", {
+			type = requestType,
+			error = "callback must be a function",
+		}, "error")
 		return false, "callback must be a function"
 	end
 
 	Requests.responseHandlers[requestType] = Requests.responseHandlers[requestType] or {}
 	Requests.responseHandlers[requestType][#Requests.responseHandlers[requestType] + 1] = callback
+	WEP:Log("Requests", "response_handler_registered", {
+		type = requestType,
+		count = #Requests.responseHandlers[requestType],
+	})
 
 	return true
 end
 
 function Requests.Send(target, requestType, data, options)
 	pruneExpiredRequests()
+	WEP:Log("Requests", "send_requested", {
+		target = target or "none",
+		type = requestType or "none",
+	})
 
 	if isBlank(target) then
+		WEP:Log("Requests", "send_failed", {
+			error = "target is required",
+		}, "error")
 		return false, "target is required"
 	end
 
 	if isBlank(requestType) then
+		WEP:Log("Requests", "send_failed", {
+			target = target,
+			error = "request type is required",
+		}, "error")
 		return false, "request type is required"
 	end
 
 	local copiedData, dataErr = copyFlatData(data)
 	if not copiedData then
+		WEP:Log("Requests", "send_failed", {
+			target = target,
+			type = requestType,
+			error = dataErr,
+		}, "error")
 		return false, dataErr
 	end
 
@@ -313,6 +362,12 @@ function Requests.Send(target, requestType, data, options)
 	local ok, messageIdOrErr = WEP.Comm:Send(REQUEST_MESSAGE_TYPE, payload, sendOptions)
 
 	if not ok then
+		WEP:Log("Requests", "send_failed", {
+			target = target,
+			type = requestType,
+			requestId = requestId,
+			error = messageIdOrErr,
+		}, "error")
 		return false, messageIdOrErr
 	end
 
@@ -328,27 +383,56 @@ function Requests.Send(target, requestType, data, options)
 		options = sendOptions,
 	}
 	Requests.stats.sent = Requests.stats.sent + 1
+	WEP:Log("Requests", "sent", {
+		target = target,
+		type = requestType,
+		requestId = requestId,
+		messageId = messageIdOrErr,
+		transport = sendOptions.transport,
+	})
 
 	return true, requestId
 end
 
 function Requests.Respond(requestId, target, status, data)
 	pruneExpiredRequests()
+	WEP:Log("Requests", "respond_requested", {
+		requestId = requestId or "none",
+		target = target or "none",
+		status = status or "none",
+	})
 
 	if isBlank(requestId) then
+		WEP:Log("Requests", "respond_failed", {
+			error = "request id is required",
+		}, "error")
 		return false, "request id is required"
 	end
 
 	if isBlank(target) then
+		WEP:Log("Requests", "respond_failed", {
+			requestId = requestId,
+			error = "target is required",
+		}, "error")
 		return false, "target is required"
 	end
 
 	if isBlank(status) then
+		WEP:Log("Requests", "respond_failed", {
+			requestId = requestId,
+			target = target,
+			error = "status is required",
+		}, "error")
 		return false, "status is required"
 	end
 
 	local copiedData, dataErr = copyFlatData(data)
 	if not copiedData then
+		WEP:Log("Requests", "respond_failed", {
+			requestId = requestId,
+			target = target,
+			error = dataErr,
+		}, "error")
 		return false, dataErr
 	end
 
@@ -382,10 +466,23 @@ function Requests.Respond(requestId, target, status, data)
 	local ok, messageIdOrErr = WEP.Comm:Send(RESPONSE_MESSAGE_TYPE, payload, sendOptions)
 
 	if not ok then
+		WEP:Log("Requests", "respond_failed", {
+			requestId = requestId,
+			target = target,
+			status = status,
+			error = messageIdOrErr,
+		}, "error")
 		return false, messageIdOrErr
 	end
 
 	Requests.stats.responsesSent = Requests.stats.responsesSent + 1
+	WEP:Log("Requests", "responded", {
+		requestId = requestId,
+		target = target,
+		status = status,
+		messageId = messageIdOrErr,
+		transport = sendOptions.transport,
+	})
 	return true, messageIdOrErr
 end
 
@@ -399,6 +496,12 @@ function Requests:OnRequestMessage(message)
 
 	if isBlank(requestId) or isBlank(requestType) or not targetMatches(target) then
 		self.stats.ignored = self.stats.ignored + 1
+		WEP:Log("Requests", "incoming_request_ignored", {
+			requestId = requestId or "none",
+			type = requestType or "none",
+			target = target or "none",
+			sender = message.sender,
+		}, "warn")
 		return
 	end
 
@@ -415,6 +518,13 @@ function Requests:OnRequestMessage(message)
 
 	self.receivedRequests[requestId] = request
 	self.stats.received = self.stats.received + 1
+	WEP:Log("Requests", "incoming_request_received", {
+		requestId = requestId,
+		type = requestType,
+		sender = message.sender,
+		target = target,
+		transport = message.transport,
+	})
 
 	dispatch(self.requestHandlers, requestType, request)
 end
@@ -429,17 +539,37 @@ function Requests:OnResponseMessage(message)
 
 	if isBlank(requestId) or isBlank(status) or not targetMatches(target) then
 		self.stats.ignored = self.stats.ignored + 1
+		WEP:Log("Requests", "incoming_response_ignored", {
+			requestId = requestId or "none",
+			status = status or "none",
+			target = target or "none",
+			sender = message.sender,
+		}, "warn")
 		return
 	end
 
 	local pendingRequest = self.pendingOutgoing[requestId]
 	if not pendingRequest then
 		self.stats.ignored = self.stats.ignored + 1
+		WEP:Log("Requests", "incoming_response_ignored", {
+			requestId = requestId,
+			status = status,
+			target = target,
+			sender = message.sender,
+			reason = "no pending request",
+		}, "warn")
 		return
 	end
 
 	if pendingRequest.target ~= BROADCAST_TARGET and not namesMatch(message.sender, pendingRequest.target) then
 		self.stats.ignored = self.stats.ignored + 1
+		WEP:Log("Requests", "incoming_response_ignored", {
+			requestId = requestId,
+			status = status,
+			target = target,
+			sender = message.sender,
+			reason = "sender mismatch",
+		}, "warn")
 		return
 	end
 
@@ -457,6 +587,13 @@ function Requests:OnResponseMessage(message)
 	}
 
 	self.stats.responsesReceived = self.stats.responsesReceived + 1
+	WEP:Log("Requests", "incoming_response_received", {
+		requestId = requestId,
+		type = requestType,
+		status = status,
+		sender = message.sender,
+		transport = message.transport,
+	})
 
 	dispatch(self.responseHandlers, requestType, response)
 

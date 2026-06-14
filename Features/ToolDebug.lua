@@ -18,6 +18,8 @@ local Dialog = WEP.Tools.Dialog
 local Requests = WEP.Tools.Requests
 local Environment = WEP.Tools.Environment
 
+WEP:Log("ToolDebug", "loaded")
+
 local function joinArgs(args, startIndex)
 	local values = {}
 
@@ -114,6 +116,7 @@ function ToolDebug:Initialize()
 	end
 
 	self.initialized = true
+	WEP:Log("ToolDebug", "initialize")
 
 	if Requests then
 		Requests.RegisterRequestHandler("debug", function(request)
@@ -154,11 +157,18 @@ end
 
 function ToolDebug:HandleSlash(args)
 	if not self:IsEnabled() then
+		WEP:Log("ToolDebug", "slash_blocked_disabled", {
+			tool = args and args[2] or "none",
+		}, "warn")
 		WEP:Print("Tool Debug is disabled. Open /wep to enable it.")
 		return
 	end
 
 	local toolName = args[2]
+	WEP:Log("ToolDebug", "slash", {
+		tool = toolName or "help",
+		action = args[3] or "none",
+	})
 
 	if not toolName or toolName == "help" then
 		self:PrintHelp()
@@ -261,6 +271,9 @@ end
 
 function ToolDebug:HandleTimer(args)
 	local action = args[3] or "now"
+	WEP:Log("ToolDebug", "timer_command", {
+		action = action,
+	})
 
 	if action == "now" then
 		WEP:Print("Timer.Now:", Timer.Now())
@@ -304,11 +317,16 @@ end
 
 function ToolDebug:HandleSound(args)
 	if not Sound then
+		WEP:Log("ToolDebug", "sound_unavailable", nil, "error")
 		WEP:Print("Sound tool unavailable.")
 		return
 	end
 
 	local action = args[3] or "list"
+	WEP:Log("ToolDebug", "sound_command", {
+		action = action,
+		name = args[4] or "none",
+	})
 
 	if action == "list" then
 		self:PrintSoundList()
@@ -418,12 +436,18 @@ function ToolDebug:HandleSound(args)
 end
 
 function ToolDebug:PlaySound(soundName, options)
+	WEP:Log("ToolDebug", "sound_play_requested", {
+		name = soundName,
+	})
 	local ok, playbackOrErr = Sound.Play(soundName, options)
 	self:PrintSoundPlaybackResult(ok, playbackOrErr)
 end
 
 function ToolDebug:PrintSoundPlaybackResult(ok, playbackOrErr)
 	if not ok then
+		WEP:Log("ToolDebug", "sound_play_failed", {
+			error = playbackOrErr,
+		}, "error")
 		WEP:Print("Sound failed:", playbackOrErr)
 		return
 	end
@@ -431,10 +455,19 @@ function ToolDebug:PrintSoundPlaybackResult(ok, playbackOrErr)
 	local playback = playbackOrErr
 
 	if playback.skipped then
+		WEP:Log("ToolDebug", "sound_play_skipped", {
+			name = playback.name,
+			reason = playback.reason,
+		}, "warn")
 		WEP:Print("Sound skipped:", playback.reason)
 		return
 	end
 
+	WEP:Log("ToolDebug", "sound_played", {
+		name = playback.name,
+		kind = playback.kind,
+		handle = playback.handle or "none",
+	})
 	WEP:Print(
 		"Sound played:",
 		playback.name,
@@ -496,6 +529,10 @@ end
 
 function ToolDebug:HandleScreenOverlay(args)
 	local action = args[3] or "status"
+	WEP:Log("ToolDebug", "overlay_command", {
+		action = action,
+		value = args[4] or "none",
+	})
 
 	if action == "blackout" then
 		local percentage = clamp(args[4], 0, 100)
@@ -526,12 +563,17 @@ end
 
 function ToolDebug:HandleUIVisibility(args)
 	if not UIVisibility then
+		WEP:Log("ToolDebug", "ui_visibility_unavailable", nil, "error")
 		WEP:Print("UI visibility tool unavailable.")
 		return
 	end
 
 	local action = args[3] or "status"
 	local target = args[4]
+	WEP:Log("ToolDebug", "ui_visibility_command", {
+		action = action,
+		target = target or "none",
+	})
 
 	if action == "hide" then
 		if target == "all" then
@@ -639,11 +681,15 @@ end
 
 function ToolDebug:HandleDialog(args)
 	if not Dialog then
+		WEP:Log("ToolDebug", "dialog_unavailable", nil, "error")
 		WEP:Print("Dialog tool unavailable.")
 		return
 	end
 
 	local action = args[3] or "sample"
+	WEP:Log("ToolDebug", "dialog_command", {
+		action = action,
+	})
 
 	if action == "sample" then
 		self:ShowSampleDialog()
@@ -670,6 +716,7 @@ function ToolDebug:HandleDialog(args)
 end
 
 function ToolDebug:ShowSampleDialog()
+	WEP:Log("ToolDebug", "sample_dialog_requested")
 	local ok, idOrErr = Dialog.Show({
 		title = "WEP Dialog Tool",
 		message = "Choose one of the available results.",
@@ -698,8 +745,14 @@ function ToolDebug:ShowSampleDialog()
 	})
 
 	if ok then
+		WEP:Log("ToolDebug", "sample_dialog_shown", {
+			id = idOrErr,
+		})
 		WEP:Print("Dialog shown:", idOrErr)
 	else
+		WEP:Log("ToolDebug", "sample_dialog_failed", {
+			error = idOrErr,
+		}, "error")
 		WEP:Print("Dialog failed:", idOrErr)
 	end
 end
@@ -717,11 +770,16 @@ end
 
 function ToolDebug:HandleEnvironment(args)
 	if not Environment then
+		WEP:Log("ToolDebug", "environment_unavailable", nil, "error")
 		WEP:Print("Environment tool unavailable.")
 		return
 	end
 
 	local action = args[3] or "status"
+	WEP:Log("ToolDebug", "environment_command", {
+		action = action,
+		value = args[4] or "none",
+	})
 
 	if action == "status" then
 		local status = Environment.GetStatus()
@@ -853,11 +911,17 @@ end
 
 function ToolDebug:HandleRequests(args)
 	if not Requests then
+		WEP:Log("ToolDebug", "requests_unavailable", nil, "error")
 		WEP:Print("Request tool unavailable.")
 		return
 	end
 
 	local action = args[3] or "status"
+	WEP:Log("ToolDebug", "request_command", {
+		action = action,
+		target = args[4] or "none",
+		type = args[5] or "none",
+	})
 
 	if action == "send" then
 		local target = args[4]

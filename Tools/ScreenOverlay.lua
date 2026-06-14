@@ -5,6 +5,8 @@ WEP.Tools = WEP.Tools or {}
 local ScreenOverlay = {}
 WEP.Tools.ScreenOverlay = ScreenOverlay
 
+WEP:Log("ScreenOverlay", "loaded")
+
 local BLACKOUT_FRAME_NAME = "WEPScreenBlackoutOverlay"
 local DEFAULT_FRAME_STRATA = "FULLSCREEN_DIALOG"
 local DEFAULT_FRAME_LEVEL = 25
@@ -41,6 +43,7 @@ local function ensureBlackoutFrame()
 	end
 
 	if not CreateFrame or not UIParent then
+		WEP:Log("ScreenOverlay", "frame_unavailable", nil, "error")
 		return nil
 	end
 
@@ -65,6 +68,7 @@ local function ensureBlackoutFrame()
 
 	frame:Hide()
 	blackoutFrame = frame
+	WEP:Log("ScreenOverlay", "frame_created")
 
 	return blackoutFrame
 end
@@ -79,10 +83,14 @@ local function applyBlackout(frame, percentage)
 end
 
 function ScreenOverlay.SetBlackoutPercentage(percentage)
+	local previousPercentage = blackoutPercentage
 	blackoutPercentage = clampPercentage(percentage)
 
 	local frame = ensureBlackoutFrame()
 	if not frame then
+		WEP:Log("ScreenOverlay", "blackout_set_failed", {
+			percentage = blackoutPercentage,
+		}, "error")
 		return false
 	end
 
@@ -92,6 +100,12 @@ function ScreenOverlay.SetBlackoutPercentage(percentage)
 		frame:Show()
 	else
 		frame:Hide()
+	end
+
+	if previousPercentage ~= blackoutPercentage then
+		WEP:Log("ScreenOverlay", "blackout_set", {
+			percentage = blackoutPercentage,
+		})
 	end
 
 	return true
