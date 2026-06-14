@@ -11,6 +11,30 @@ local ROW_HEIGHT = 48
 
 local panelWindow
 
+local function setButtonEnabled(button, enabled)
+	if not button then
+		return
+	end
+
+	if enabled == false then
+		if button.Disable then
+			button:Disable()
+		end
+
+		if button.SetAlpha then
+			button:SetAlpha(0.45)
+		end
+	else
+		if button.Enable then
+			button:Enable()
+		end
+
+		if button.SetAlpha then
+			button:SetAlpha(1)
+		end
+	end
+end
+
 local function setSolidColor(texture, red, green, blue, alpha)
 	if texture.SetColorTexture then
 		texture:SetColorTexture(red, green, blue, alpha)
@@ -42,17 +66,22 @@ local function ensureRow(window, index)
 
 	row.title = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	row.title:SetPoint("LEFT", row.check, "RIGHT", 2, 8)
-	row.title:SetWidth(245)
+	row.title:SetWidth(280)
 	row.title:SetJustifyH("LEFT")
 
 	row.description = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -2)
-	row.description:SetWidth(245)
+	row.description:SetWidth(280)
 	row.description:SetJustifyH("LEFT")
 
+	row.openButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	row.openButton:SetSize(64, 22)
+	row.openButton:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+	row.openButton:SetText("Open")
+
 	row.status = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	row.status:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-	row.status:SetWidth(72)
+	row.status:SetPoint("RIGHT", row.openButton, "LEFT", -8, 0)
+	row.status:SetWidth(52)
 	row.status:SetJustifyH("RIGHT")
 
 	row.check:SetScript("OnClick", function(button)
@@ -76,6 +105,26 @@ local function ensureRow(window, index)
 		FeaturePanel:RefreshWindow()
 	end)
 
+	row.openButton:SetScript("OnClick", function()
+		if not row.featureId then
+			return
+		end
+
+		WEP:Log("FeaturePanel", "feature_open_clicked", {
+			id = row.featureId,
+		})
+		local ok, err = WEP:OpenFeatureUI(row.featureId)
+		if not ok then
+			WEP:Log("FeaturePanel", "feature_open_failed", {
+				id = row.featureId,
+				error = err,
+			}, "error")
+			WEP:Print("Feature UI unavailable:", err)
+		end
+
+		FeaturePanel:RefreshWindow()
+	end)
+
 	window.rows[index] = row
 	return row
 end
@@ -94,7 +143,7 @@ function FeaturePanel:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPFeaturePanelWindow",
 		title = "WEP Features",
-		width = 420,
+		width = 500,
 		height = 320,
 		onShow = function()
 			self:RefreshWindow()
@@ -165,6 +214,17 @@ function FeaturePanel:RefreshWindow()
 		row.description:SetText(feature.description)
 		row.status:SetText(feature.enabled and "On" or "Off")
 		row.status:SetTextColor(feature.enabled and 0.3 or 0.8, feature.enabled and 1 or 0.3, 0.3)
+
+		row.status:ClearAllPoints()
+		if feature.hasUI then
+			row.status:SetPoint("RIGHT", row.openButton, "LEFT", -8, 0)
+			row.openButton:Show()
+			setButtonEnabled(row.openButton, feature.enabled == true)
+		else
+			row.status:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+			row.openButton:Hide()
+		end
+
 		row:Show()
 	end
 

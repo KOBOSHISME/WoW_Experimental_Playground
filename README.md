@@ -46,7 +46,7 @@ Open the default feature panel with:
 /wep
 ```
 
-The panel lists registered features and lets you turn each one on or off.
+The panel lists registered features, lets you turn each one on or off, and opens feature UI panels when available.
 
 Recent addon activity is stored in a capped saved log buffer for after-the-fact debugging:
 

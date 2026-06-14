@@ -34,6 +34,26 @@ local MIN_LOG_MAX_ENTRIES = 50
 local MAX_LOG_MAX_ENTRIES = 1000
 local MAX_LOG_DETAILS_LENGTH = 240
 
+local function getFeatureUIHandler(feature)
+	if type(feature) ~= "table" then
+		return nil
+	end
+
+	if type(feature.OpenUI) == "function" then
+		return feature.OpenUI
+	end
+
+	if type(feature.ShowMenu) == "function" then
+		return feature.ShowMenu
+	end
+
+	if type(feature.ShowWindow) == "function" then
+		return feature.ShowWindow
+	end
+
+	return nil
+end
+
 local function clampLogLimit(limit)
 	limit = tonumber(limit) or DEFAULT_LOG_MAX_ENTRIES
 
@@ -194,11 +214,43 @@ function WEP:GetFeatures()
 				title = feature.title or id,
 				description = feature.description or "",
 				enabled = self:IsFeatureEnabled(id),
+				hasUI = getFeatureUIHandler(feature) ~= nil,
 			}
 		end
 	end
 
 	return features
+end
+
+function WEP:OpenFeatureUI(id)
+	local feature = self.features[id]
+
+	if not feature then
+		return false, "unknown feature"
+	end
+
+	if not self:IsFeatureEnabled(id) then
+		return false, "feature disabled"
+	end
+
+	local handler = getFeatureUIHandler(feature)
+	if not handler then
+		return false, "feature has no UI"
+	end
+
+	local ok, err = pcall(handler, feature)
+	if not ok then
+		self:Log("Core", "feature_ui_open_failed", {
+			id = id,
+			error = err,
+		}, "error")
+		return false, err
+	end
+
+	self:Log("Core", "feature_ui_opened", {
+		id = id,
+	})
+	return true
 end
 
 function WEP:Print(...)
