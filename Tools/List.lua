@@ -151,6 +151,20 @@ function List.Create(parent, config)
 		end
 	end
 
+	function list:SetVisibleRows(visibleRows)
+		visibleRows = math.max(1, math.floor(tonumber(visibleRows) or self.visibleRows))
+
+		if visibleRows == self.visibleRows then
+			return
+		end
+
+		self.visibleRows = visibleRows
+		self.frame:SetHeight(self.rowHeight * self.visibleRows)
+		WEP:Log("List", "visible_rows_set", {
+			visibleRows = self.visibleRows,
+		})
+	end
+
 	function list:SetEmptyText(text)
 		self.emptyText = text or ""
 		self.frame.empty:SetText(self.emptyText)

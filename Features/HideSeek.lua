@@ -76,6 +76,8 @@ local targetBindingOwner
 local targetBindingButton
 
 local TRACKER_MAX_NAMES = 4
+local GAME_WINDOW_MIN_ROSTER_ROWS = 3
+local GAME_WINDOW_ROSTER_BASE_HEIGHT = 285
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
@@ -435,6 +437,10 @@ function HideSeek:RemovePlayer(name)
 		return false
 	end
 
+	local clearedSelectedSeeker = self.seeker
+		and namesMatch(name, self.seeker)
+		and (self.status == STATUS_IDLE or self.status == STATUS_LOBBY or self.status == STATUS_ENDED)
+
 	self.players[key] = nil
 
 	for index, orderKey in ipairs(self.playerOrder) do
@@ -444,9 +450,14 @@ function HideSeek:RemovePlayer(name)
 		end
 	end
 
+	if clearedSelectedSeeker then
+		self.seeker = nil
+	end
+
 	WEP:Log("HideSeek", "player_removed", {
 		gameId = self.gameId or "none",
 		player = name,
+		clearedSelectedSeeker = clearedSelectedSeeker == true,
 	})
 	return true
 end
@@ -499,6 +510,65 @@ function HideSeek:GetFoundCount()
 	end
 
 	return count
+end
+
+function HideSeek:GetSelectedSeeker()
+	if not self.seeker then
+		return nil
+	end
+
+	local player = self:GetPlayer(self.seeker)
+	if not player then
+		return nil
+	end
+
+	return player.name
+end
+
+function HideSeek:SetSelectedSeeker(name, broadcast)
+	name = trim(name)
+
+	if name == "" then
+		self.seeker = nil
+		WEP:Print("Hide and Seek seeker will be chosen randomly.")
+		WEP:Log("HideSeek", "selected_seeker_cleared", {
+			gameId = self.gameId or "none",
+		})
+
+		if broadcast then
+			self:BroadcastState()
+		else
+			self:RefreshWindow()
+		end
+
+		return true
+	end
+
+	local player = self:GetPlayer(name)
+	if not player then
+		WEP:Print("Seeker must be in the current Hide and Seek roster.")
+		WEP:Log("HideSeek", "selected_seeker_failed", {
+			gameId = self.gameId or "none",
+			seeker = name,
+			error = "not in roster",
+		}, "warn")
+		return false
+	end
+
+	self.seeker = player.name
+	WEP:Print("Hide and Seek seeker:", self.seeker)
+	WEP:Log("HideSeek", "selected_seeker_set", {
+		gameId = self.gameId or "none",
+		seeker = self.seeker,
+	})
+
+	if broadcast then
+		self:BroadcastState()
+	else
+		self:RefreshWindow()
+	end
+
+	return true
 end
 
 function HideSeek:AllHidersFound()
@@ -664,6 +734,7 @@ end
 
 function HideSeek:GetRosterItems()
 	local items = {}
+	local canSelectSeeker = self:CanHostControl()
 
 	for _, key in ipairs(self.playerOrder) do
 		local player = self.players[key]
@@ -702,6 +773,14 @@ function HideSeek:GetRosterItems()
 				},
 				color = color,
 			}
+
+			if canSelectSeeker then
+				local playerName = player.name
+
+				items[#items].onClick = function()
+					self:SelectSeeker(playerName)
+				end
+			end
 		end
 	end
 
@@ -718,6 +797,8 @@ function HideSeek:GetGameDetailText()
 
 	if self.seeker then
 		details[#details + 1] = "Seeker " .. self.seeker
+	elseif self.status == STATUS_LOBBY then
+		details[#details + 1] = "Seeker Random"
 	end
 
 	if self.status == STATUS_SEEKING then
@@ -863,6 +944,8 @@ function HideSeek:EnsureTrackerWindow()
 		width = 280,
 		height = 220,
 		level = 85,
+		resizable = true,
+		collapsible = true,
 		onShow = function()
 			self:RefreshTrackerWindow()
 			self:ScheduleWindowRefresh()
@@ -1119,8 +1202,15 @@ function HideSeek:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPHideSeekWindow",
 		title = "Hide and Seek",
-		width = 600,
-		height = 430,
+		width = 620,
+		height = 520,
+		minWidth = 560,
+		minHeight = 360,
+		resizable = true,
+		collapsible = true,
+		onResize = function()
+			self:RefreshWindow()
+		end,
 		onShow = function()
 			self:RefreshWindow()
 			self:ScheduleWindowRefresh()
@@ -1175,7 +1265,7 @@ function HideSeek:EnsureWindow()
 		width = 92,
 		numeric = true,
 	})
-	window.hideInput:SetPoint("TOPLEFT", window.inviteButton, "TOPRIGHT", 18, 18)
+	window.hideInput:SetPoint("TOPLEFT", window.inviteInput, "BOTTOMLEFT", 0, -8)
 
 	window.seekInput = Form.CreateInput(content, {
 		label = "Seek seconds",
@@ -1193,8 +1283,35 @@ function HideSeek:EnsureWindow()
 	})
 	window.applyButton:SetPoint("LEFT", window.seekInput.editBox, "RIGHT", 12, 0)
 
+	window.seekerInput = Form.CreateInput(content, {
+		label = "Seeker",
+		width = 170,
+		onEnterPressed = function()
+			self:SetSeekerFromWindow()
+		end,
+	})
+	window.seekerInput:SetPoint("TOPLEFT", window.hideInput, "BOTTOMLEFT", 0, -8)
+
+	window.seekerButton = Form.CreateButton(content, {
+		text = "Set",
+		width = 72,
+		onClick = function()
+			self:SetSeekerFromWindow()
+		end,
+	})
+	window.seekerButton:SetPoint("LEFT", window.seekerInput.editBox, "RIGHT", 12, 0)
+
+	window.randomSeekerButton = Form.CreateButton(content, {
+		text = "Random",
+		width = 86,
+		onClick = function()
+			self:SelectSeeker("")
+		end,
+	})
+	window.randomSeekerButton:SetPoint("LEFT", window.seekerButton, "RIGHT", 8, 0)
+
 	window.rosterTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.rosterTitle:SetPoint("TOPLEFT", window.inviteInput, "BOTTOMLEFT", 0, -18)
+	window.rosterTitle:SetPoint("TOPLEFT", window.seekerInput, "BOTTOMLEFT", 0, -18)
 	window.rosterTitle:SetText("Roster")
 
 	window.rosterList = List.Create(content, {
@@ -1218,6 +1335,7 @@ function HideSeek:EnsureWindow()
 		},
 	})
 	window.rosterList.frame:SetPoint("TOPLEFT", window.rosterTitle, "BOTTOMLEFT", 0, -8)
+	window.rosterList.frame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 
 	window.startButton = Form.CreateButton(window.footer, {
 		text = "Start",
@@ -1251,6 +1369,22 @@ function HideSeek:EnsureWindow()
 	return gameWindow
 end
 
+function HideSeek:UpdateGameWindowRosterRows()
+	local window = gameWindow
+	if not window or not window.rosterList or not window.frame or (window.IsCollapsed and window:IsCollapsed()) then
+		return
+	end
+
+	local height = window.frame.GetHeight and window.frame:GetHeight() or 0
+	local visibleRows = math.floor((height - GAME_WINDOW_ROSTER_BASE_HEIGHT) / window.rosterList.rowHeight)
+
+	if visibleRows < GAME_WINDOW_MIN_ROSTER_ROWS then
+		visibleRows = GAME_WINDOW_MIN_ROSTER_ROWS
+	end
+
+	window.rosterList:SetVisibleRows(visibleRows)
+end
+
 function HideSeek:RefreshWindow()
 	self:RefreshTrackerWindow()
 
@@ -1266,16 +1400,21 @@ function HideSeek:RefreshWindow()
 	window.statusText:SetText("Game State: " .. getStatusLabel(self.status))
 	window.detailText:SetText(self:GetGameDetailText())
 	window.timerText:SetText(self:GetTimerText())
+	self:UpdateGameWindowRosterRows()
 	window.rosterList:SetItems(self:GetRosterItems())
 
 	setInputValueIfNotFocused(window.hideInput, self.hideSeconds)
 	setInputValueIfNotFocused(window.seekInput, self.seekSeconds)
+	setInputValueIfNotFocused(window.seekerInput, self:GetSelectedSeeker() or "")
 
 	setInputEnabled(window.inviteInput, canHostControl)
 	setInputEnabled(window.hideInput, canHostControl)
 	setInputEnabled(window.seekInput, canHostControl)
+	setInputEnabled(window.seekerInput, canHostControl)
 	setButtonEnabled(window.inviteButton, canHostControl)
 	setButtonEnabled(window.applyButton, canHostControl)
+	setButtonEnabled(window.seekerButton, canHostControl)
+	setButtonEnabled(window.randomSeekerButton, canHostControl)
 	setButtonEnabled(window.startButton, canStart)
 	setButtonEnabled(window.leaveButton, hasGame)
 	setButtonEnabled(window.refreshButton, true)
@@ -1335,18 +1474,70 @@ function HideSeek:InviteFromWindow()
 	self:RefreshWindow()
 end
 
+function HideSeek:SelectSeeker(name)
+	if not self:EnsureHostLobby() then
+		self:RefreshWindow()
+		return false
+	end
+
+	return self:SetSelectedSeeker(name, true)
+end
+
+function HideSeek:SetSeekerFromWindow()
+	local window = self:EnsureWindow()
+	if not window then
+		return false
+	end
+
+	return self:SelectSeeker(window.seekerInput:GetValue())
+end
+
+function HideSeek:ReadWindowSeeker()
+	local window = gameWindow
+	if not window or not window.seekerInput then
+		return true
+	end
+
+	local seekerName = trim(window.seekerInput:GetValue())
+	if seekerName == "" then
+		self.seeker = nil
+		return true
+	end
+
+	local player = self:GetPlayer(seekerName)
+	if not player then
+		WEP:Print("Seeker must be in the current Hide and Seek roster.")
+		WEP:Log("HideSeek", "window_settings_failed", {
+			gameId = self.gameId or "none",
+			seeker = seekerName,
+			error = "seeker not in roster",
+		}, "warn")
+		return false
+	end
+
+	self.seeker = player.name
+	return true
+end
+
 function HideSeek:ReadWindowSettings()
 	local window = gameWindow
 	if not window then
-		return
+		return true
 	end
 
 	self.hideSeconds = clamp(window.hideInput:GetValue(), MIN_HIDE_SECONDS, MAX_HIDE_SECONDS, self.hideSeconds)
 	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
+
+	if not self:ReadWindowSeeker() then
+		return false
+	end
+
 	WEP:Log("HideSeek", "window_settings_read", {
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
+		seeker = self.seeker or "random",
 	})
+	return true
 end
 
 function HideSeek:ApplyWindowSettings()
@@ -1360,12 +1551,17 @@ function HideSeek:ApplyWindowSettings()
 		return
 	end
 
-	self:ReadWindowSettings()
-	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds))
+	if not self:ReadWindowSettings() then
+		self:RefreshWindow()
+		return
+	end
+
+	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "seeker", self.seeker or "random")
 	WEP:Log("HideSeek", "settings_applied", {
 		gameId = self.gameId or "none",
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
+		seeker = self.seeker or "random",
 	})
 	self:BroadcastState()
 	self:RefreshWindow()
@@ -1812,7 +2008,10 @@ function HideSeek:StartGame()
 		return
 	end
 
-	self:ReadWindowSettings()
+	if not self:ReadWindowSettings() then
+		self:ShowMenu()
+		return
+	end
 
 	if self:GetPlayerCount() < 2 then
 		WEP:Log("HideSeek", "start_failed", {
@@ -1825,7 +2024,7 @@ function HideSeek:StartGame()
 		return
 	end
 
-	local seeker = self:PickRandomSeeker()
+	local seeker = self:GetSelectedSeeker() or self:PickRandomSeeker()
 	if not seeker then
 		WEP:Log("HideSeek", "start_failed", {
 			gameId = self.gameId or "none",
