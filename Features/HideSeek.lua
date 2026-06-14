@@ -252,6 +252,18 @@ local function formatDuration(seconds)
 	return seconds .. "s"
 end
 
+local function formatMapDistance(distance)
+	if type(distance) ~= "number" then
+		return "unknown"
+	end
+
+	if distance < 10 then
+		return string.format("%.1f", distance)
+	end
+
+	return tostring(math.floor(distance + 0.5))
+end
+
 local function playSound(name)
 	if Sound and Sound.Play then
 		Sound.Play(name, { duration = 1 })
@@ -773,6 +785,7 @@ function HideSeek:ClearStartSpot()
 	self.seekerSpotUpdatedAt = nil
 	self.seekerAbsentSince = nil
 	self.startLocationUnavailableWarned = false
+	self:ClearStartSpotWaypoint()
 	self:CancelSafeAttempt()
 	self:HideHomeStatus()
 end
@@ -877,6 +890,80 @@ function HideSeek:IsAtStartSpot()
 	end
 
 	return distance <= self:GetStartRadius(), distance
+end
+
+function HideSeek:GetStartSpotNavigationText()
+	if not self:HasStartSpot() then
+		return "Start: not set"
+	end
+
+	local atStart, reasonOrDistance = self:IsAtStartSpot()
+	if atStart == true then
+		return "Start: here"
+	end
+
+	if type(reasonOrDistance) == "number" then
+		return "Start: " .. formatMapDistance(reasonOrDistance) .. " away"
+	end
+
+	return "Start: " .. tostring(reasonOrDistance or "away")
+end
+
+function HideSeek:CanUseStartSpotWaypoint()
+	return C_Map
+		and C_Map.SetUserWaypoint
+		and UiMapPoint
+		and UiMapPoint.CreateFromCoordinates
+end
+
+function HideSeek:SetStartSpotWaypoint()
+	if not self:HasStartSpot() or not self:IsParticipant() then
+		return false
+	end
+
+	if not self:CanUseStartSpotWaypoint() then
+		if not self.startWaypointUnavailableWarned then
+			self.startWaypointUnavailableWarned = true
+			WEP:Print("Map waypoint unavailable. Use the Hide and Seek tracker for the starting spot.")
+			WEP:Log("HideSeek", "start_waypoint_unavailable", {
+				gameId = self.gameId or "none",
+			}, "warn")
+		end
+
+		return false
+	end
+
+	local point = UiMapPoint.CreateFromCoordinates(self.startMapId, self.startX / 100, self.startY / 100)
+	local ok, err = pcall(C_Map.SetUserWaypoint, point)
+	if not ok then
+		WEP:Log("HideSeek", "start_waypoint_failed", {
+			gameId = self.gameId or "none",
+			error = err,
+		}, "warn")
+		return false
+	end
+
+	if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+		pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
+	end
+
+	self.startWaypointSet = true
+	self.startWaypointUnavailableWarned = false
+	WEP:Log("HideSeek", "start_waypoint_set", {
+		gameId = self.gameId or "none",
+		mapId = self.startMapId,
+		x = self.startX,
+		y = self.startY,
+	})
+	return true
+end
+
+function HideSeek:ClearStartSpotWaypoint()
+	if self.startWaypointSet and C_Map and C_Map.ClearUserWaypoint then
+		pcall(C_Map.ClearUserWaypoint)
+	end
+
+	self.startWaypointSet = false
 end
 
 function HideSeek:ShowHomeStatus(text)
@@ -1785,7 +1872,7 @@ function HideSeek:EnsureTrackerWindow()
 		name = "WEPHideSeekTrackerWindow",
 		title = "Hide and Seek",
 		width = 280,
-		height = 220,
+		height = 240,
 		level = 85,
 		resizable = true,
 		collapsible = true,
@@ -1832,6 +1919,11 @@ function HideSeek:EnsureTrackerWindow()
 	window.hidingText:SetPoint("TOPLEFT", window.seekerText, "BOTTOMLEFT", 0, -6)
 	window.hidingText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
 	window.hidingText:SetJustifyH("LEFT")
+
+	window.startText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.startText:SetPoint("TOPLEFT", window.hidingText, "BOTTOMLEFT", 0, -6)
+	window.startText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.startText:SetJustifyH("LEFT")
 
 	window.revealButton = Form.CreateButton(window.footer, {
 		text = "Reveal",
@@ -2039,6 +2131,7 @@ function HideSeek:RefreshTrackerWindow()
 	window.playingText:SetText("Playing: " .. formatTrackerNames(playing))
 	window.seekerText:SetText("Seeking: " .. (seeker or "Not chosen"))
 	window.hidingText:SetText("Hiding: " .. hidingText)
+	window.startText:SetText(self:GetStartSpotNavigationText())
 	if window.revealButton then
 		if self:IsSeeker()
 			and self.status == STATUS_SEEKING
@@ -2230,7 +2323,7 @@ function HideSeek:EnsureWindow()
 
 	window.startButton = Form.CreateButton(window.footer, {
 		text = "Start",
-		width = 88,
+		width = 104,
 		onClick = function()
 			self:StartGame()
 		end,
@@ -2286,7 +2379,9 @@ function HideSeek:RefreshWindow()
 
 	local canHostControl = self:CanHostControl()
 	local hasGame = self.gameId ~= nil
-	local canStart = canHostControl and self.status == STATUS_LOBBY and self:GetPlayerCount() >= 2
+	local canStart = canHostControl
+		and (self.status == STATUS_LOBBY or self.status == STATUS_ENDED)
+		and self:GetPlayerCount() >= 2
 
 	window.statusText:SetText("Game State: " .. getStatusLabel(self.status))
 	window.detailText:SetText(self:GetGameDetailText())
@@ -2310,6 +2405,7 @@ function HideSeek:RefreshWindow()
 	setButtonEnabled(window.applyButton, canHostControl)
 	setButtonEnabled(window.seekerButton, canHostControl)
 	setButtonEnabled(window.randomSeekerButton, canHostControl)
+	window.startButton:SetText(self.status == STATUS_ENDED and "Start Again" or "Start")
 	setButtonEnabled(window.startButton, canStart)
 	setButtonEnabled(window.leaveButton, hasGame)
 	setButtonEnabled(window.refreshButton, true)
@@ -3205,6 +3301,8 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 		remaining = remaining,
 	})
 
+	self:SetStartSpotWaypoint()
+
 	if self:IsSeeker() then
 		ScreenOverlay.SetBlackoutPercentage(100)
 		self:ShowCountdown(hideSeconds, startedAt, function()
@@ -3659,6 +3757,7 @@ function HideSeek:FinishGame(reason, broadcast, nextSeeker)
 	end
 	self.timerToken = (self.timerToken or 0) + 1
 	self:StopHomeMonitor()
+	self:ClearStartSpotWaypoint()
 	self:HideCountdown()
 	ScreenOverlay.HideBlackout()
 	self:RestoreSeekerUI()
