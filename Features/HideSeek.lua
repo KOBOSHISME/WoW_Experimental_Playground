@@ -4,6 +4,7 @@ local HideSeek = {
 	hideSeconds = 30,
 	seekSeconds = 300,
 	startRadius = 1,
+	areaRadius = 10,
 	starRevealUses = 0,
 	starRevealUsesRemaining = 0,
 	players = {},
@@ -45,6 +46,7 @@ local MSG_START_SPOT = "hide_seek_start_spot"
 local MSG_SEEKER_SPOT = "hide_seek_seeker_spot"
 local MSG_TAGGED = "hide_seek_tagged"
 local MSG_SAFE = "hide_seek_safe"
+local MSG_OUT_OF_BOUNDS = "hide_seek_out_of_bounds"
 
 local STATUS_IDLE = "idle"
 local STATUS_LOBBY = "lobby"
@@ -58,7 +60,10 @@ local MIN_SEEK_SECONDS = 30
 local MAX_SEEK_SECONDS = 3600
 local MIN_START_RADIUS = 1
 local MAX_START_RADIUS = 100
+local MIN_AREA_RADIUS = 1
+local MAX_AREA_RADIUS = 100
 local HOME_CHECK_INTERVAL_SECONDS = 1
+local OUT_OF_BOUNDS_SECONDS = 5
 local SAFE_CONFIRM_SECONDS = 1
 local SEEKER_SPOT_STALE_SECONDS = 3
 local START_SPOT_RESPONSE_TIMEOUT_SECONDS = 10
@@ -90,6 +95,9 @@ local TARGET_BINDING_BUTTON_NAME = "WEPHideSeekTargetBindingBlocker"
 
 local countdownFrame
 local homeStatusFrame
+local boundaryStatusFrame
+local mapAreaOverlay
+local minimapAreaOverlay
 local gameWindow
 local trackerWindow
 local targetBindingOwner
@@ -98,6 +106,9 @@ local targetBindingButton
 local TRACKER_MAX_NAMES = 4
 local GAME_WINDOW_MIN_ROSTER_ROWS = 3
 local GAME_WINDOW_ROSTER_BASE_HEIGHT = 285
+local AREA_TINT_STRIPS = 32
+local AREA_MAP_TINT_ALPHA = 0.32
+local AREA_MINIMAP_TINT_ALPHA = 0.38
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
@@ -321,6 +332,296 @@ local function ensureHomeStatusFrame()
 	return homeStatusFrame
 end
 
+local function ensureBoundaryStatusFrame()
+	if boundaryStatusFrame then
+		return boundaryStatusFrame
+	end
+
+	if not CreateFrame or not UIParent then
+		return nil
+	end
+
+	local frame = CreateFrame("Frame", "WEPHideSeekBoundaryStatusFrame", UIParent)
+	frame:SetAllPoints(UIParent)
+	frame:SetFrameStrata("FULLSCREEN_DIALOG")
+	frame:SetFrameLevel(82)
+	frame:EnableMouse(false)
+	frame:Hide()
+
+	frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+	frame.text:SetPoint("CENTER", frame, "CENTER", 0, 0)
+	frame.text:SetJustifyH("CENTER")
+	frame.text:SetJustifyV("MIDDLE")
+	frame.text:SetTextColor(1, 0.18, 0.12, 1)
+
+	boundaryStatusFrame = frame
+	return boundaryStatusFrame
+end
+
+local function setSolidColor(texture, red, green, blue, alpha)
+	if not texture then
+		return
+	end
+
+	if texture.SetColorTexture then
+		texture:SetColorTexture(red, green, blue, alpha)
+	elseif texture.SetTexture then
+		texture:SetTexture(red, green, blue, alpha)
+	end
+end
+
+local function setRegionSize(region, width, height)
+	if region.SetSize then
+		region:SetSize(width, height)
+	else
+		if region.SetWidth then
+			region:SetWidth(width)
+		end
+
+		if region.SetHeight then
+			region:SetHeight(height)
+		end
+	end
+end
+
+local function setOverlayTexture(texture, parent, left, top, width, height)
+	if not texture then
+		return
+	end
+
+	if width <= 0 or height <= 0 then
+		texture:Hide()
+		return
+	end
+
+	texture:ClearAllPoints()
+	texture:SetPoint("TOPLEFT", parent, "TOPLEFT", left, -top)
+	setRegionSize(texture, width, height)
+	texture:Show()
+end
+
+local function setOverlayMarker(marker, parent, x, y, size, alpha)
+	if not marker then
+		return
+	end
+
+	marker:ClearAllPoints()
+	marker:SetPoint("CENTER", parent, "TOPLEFT", x, -y)
+	setRegionSize(marker, size, size)
+
+	if marker.SetAlpha then
+		marker:SetAlpha(alpha or 1)
+	end
+
+	marker:Show()
+end
+
+local function hideAreaOverlay(overlay)
+	if overlay then
+		overlay:Hide()
+	end
+end
+
+local function createTintTexture(parent)
+	local texture = parent:CreateTexture(nil, "ARTWORK")
+	setSolidColor(texture, 1, 0.05, 0.05, AREA_MAP_TINT_ALPHA)
+	texture:Hide()
+	return texture
+end
+
+local function createAreaOverlay(name, parent, tintAlpha)
+	if not CreateFrame or not parent then
+		return nil
+	end
+
+	local frame = CreateFrame("Frame", name, parent)
+	frame:SetAllPoints(parent)
+	frame:EnableMouse(false)
+	frame:Hide()
+	frame.parent = parent
+	frame.tintAlpha = tintAlpha
+
+	if parent.GetFrameLevel and frame.SetFrameLevel then
+		frame:SetFrameLevel((parent:GetFrameLevel() or 0) + 20)
+	end
+
+	frame.leftTint = createTintTexture(frame)
+	frame.rightTint = createTintTexture(frame)
+	frame.strips = {}
+
+	for index = 1, AREA_TINT_STRIPS do
+		frame.strips[index] = {
+			top = createTintTexture(frame),
+			bottom = createTintTexture(frame),
+		}
+	end
+
+	frame.marker = frame:CreateTexture(nil, "OVERLAY")
+	setSolidColor(frame.marker, 1, 0.85, 0.1, 1)
+	frame.marker:Hide()
+
+	frame.lines = {}
+	if frame.CreateLine then
+		for index = 1, AREA_TINT_STRIPS do
+			local line = frame:CreateLine(nil, "OVERLAY")
+
+			if line.SetThickness then
+				line:SetThickness(2)
+			end
+
+			setSolidColor(line, 1, 0.05, 0.05, 0.95)
+			line:Hide()
+			frame.lines[index] = line
+		end
+	end
+
+	return frame
+end
+
+local function prepareAreaOverlay(overlay, parent, tintAlpha)
+	if not overlay or not parent then
+		return nil
+	end
+
+	if overlay.parent ~= parent then
+		overlay:SetParent(parent)
+		overlay:ClearAllPoints()
+		overlay:SetAllPoints(parent)
+		overlay.parent = parent
+	end
+
+	overlay.tintAlpha = tintAlpha
+	setSolidColor(overlay.leftTint, 1, 0.05, 0.05, tintAlpha)
+	setSolidColor(overlay.rightTint, 1, 0.05, 0.05, tintAlpha)
+
+	for _, strip in ipairs(overlay.strips or {}) do
+		setSolidColor(strip.top, 1, 0.05, 0.05, tintAlpha)
+		setSolidColor(strip.bottom, 1, 0.05, 0.05, tintAlpha)
+	end
+
+	return overlay
+end
+
+local function getWorldMapOverlayParent()
+	if not WorldMapFrame then
+		return nil
+	end
+
+	if WorldMapFrame.GetCanvas then
+		local ok, canvas = pcall(WorldMapFrame.GetCanvas, WorldMapFrame)
+		if ok and canvas then
+			return canvas
+		end
+	end
+
+	if WorldMapFrame.ScrollContainer then
+		return WorldMapFrame.ScrollContainer.Child or WorldMapFrame.ScrollContainer
+	end
+
+	return WorldMapFrame
+end
+
+local function getShownWorldMapId()
+	if not WorldMapFrame or not WorldMapFrame.GetMapID then
+		return nil
+	end
+
+	local ok, mapId = pcall(WorldMapFrame.GetMapID, WorldMapFrame)
+	if ok then
+		return tonumber(mapId)
+	end
+
+	return nil
+end
+
+local function clampCoordinate(value, minValue, maxValue)
+	value = tonumber(value) or minValue
+
+	if value < minValue then
+		return minValue
+	end
+
+	if value > maxValue then
+		return maxValue
+	end
+
+	return value
+end
+
+local function updateAreaOverlay(overlay, centerX, centerY, radiusX, radiusY, width, height, markerSize, markerAlpha)
+	if not overlay then
+		return
+	end
+
+	width = tonumber(width) or 0
+	height = tonumber(height) or 0
+	if width <= 0 or height <= 0 or radiusX <= 0 or radiusY <= 0 then
+		hideAreaOverlay(overlay)
+		return
+	end
+
+	local leftEdge = centerX - radiusX
+	local rightEdge = centerX + radiusX
+	setOverlayTexture(overlay.leftTint, overlay, 0, 0, math.min(width, math.max(0, leftEdge)), height)
+	setOverlayTexture(overlay.rightTint, overlay, math.max(0, rightEdge), 0, math.max(0, width - math.max(0, rightEdge)), height)
+
+	local stripWidth = (radiusX * 2) / AREA_TINT_STRIPS
+
+	for index, strip in ipairs(overlay.strips or {}) do
+		local stripLeft = leftEdge + ((index - 1) * stripWidth)
+		local stripRight = stripLeft + stripWidth
+		local visibleLeft = math.max(0, stripLeft)
+		local visibleRight = math.min(width, stripRight)
+		local visibleWidth = visibleRight - visibleLeft
+
+		if visibleWidth <= 0 then
+			strip.top:Hide()
+			strip.bottom:Hide()
+		else
+			local stripCenterOffset = (stripLeft + (stripWidth / 2)) - centerX
+			local normalized = stripCenterOffset / radiusX
+			local halfHeight = 0
+
+			if normalized > -1 and normalized < 1 then
+				halfHeight = radiusY * math.sqrt(1 - (normalized * normalized))
+			end
+
+			local topHeight = clampCoordinate(centerY - halfHeight, 0, height)
+			local bottomTop = clampCoordinate(centerY + halfHeight, 0, height)
+			setOverlayTexture(strip.top, overlay, visibleLeft, 0, visibleWidth + 1, topHeight)
+			setOverlayTexture(strip.bottom, overlay, visibleLeft, bottomTop, visibleWidth + 1, height - bottomTop)
+		end
+	end
+
+	if overlay.lines and #overlay.lines > 0 then
+		local count = #overlay.lines
+
+		for index, line in ipairs(overlay.lines) do
+			local angleA = ((index - 1) / count) * math.pi * 2
+			local angleB = (index / count) * math.pi * 2
+			local xA = centerX + (math.cos(angleA) * radiusX)
+			local yA = centerY + (math.sin(angleA) * radiusY)
+			local xB = centerX + (math.cos(angleB) * radiusX)
+			local yB = centerY + (math.sin(angleB) * radiusY)
+			local ok = line.SetStartPoint and line.SetEndPoint
+
+			if ok then
+				ok = pcall(line.SetStartPoint, line, "TOPLEFT", overlay, xA, -yA)
+					and pcall(line.SetEndPoint, line, "TOPLEFT", overlay, xB, -yB)
+			end
+
+			if ok then
+				line:Show()
+			else
+				line:Hide()
+			end
+		end
+	end
+
+	setOverlayMarker(overlay.marker, overlay, centerX, centerY, markerSize or 10, markerAlpha or 1)
+	overlay:Show()
+end
+
 function HideSeek:IsEnabled()
 	return WEP:IsFeatureEnabled(FEATURE_ID)
 end
@@ -446,6 +747,14 @@ function HideSeek:Initialize()
 		end
 
 		self:OnSafeMessage(message)
+	end)
+
+	WEP.Comm:RegisterHandler(MSG_OUT_OF_BOUNDS, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
+		self:OnOutOfBoundsMessage(message)
 	end)
 
 	self.frame = CreateFrame("Frame")
@@ -737,8 +1046,13 @@ function HideSeek:ResetStarRevealUses()
 end
 
 function HideSeek:GetStartRadius()
-	self.startRadius = clamp(self.startRadius or self.areaRadius, MIN_START_RADIUS, MAX_START_RADIUS, 1)
+	self.startRadius = clamp(self.startRadius, MIN_START_RADIUS, MAX_START_RADIUS, 1)
 	return self.startRadius
+end
+
+function HideSeek:GetAreaRadius()
+	self.areaRadius = clamp(self.areaRadius, math.max(MIN_AREA_RADIUS, self:GetStartRadius()), MAX_AREA_RADIUS, 10)
+	return self.areaRadius
 end
 
 function HideSeek:HasStartSpot()
@@ -747,6 +1061,7 @@ end
 
 function HideSeek:AddStartSpotPayload(payload, includeSpot)
 	payload.ar = self:GetStartRadius()
+	payload.br = self:GetAreaRadius()
 
 	if includeSpot and self:HasStartSpot() then
 		payload.am = self.startMapId
@@ -760,6 +1075,7 @@ end
 function HideSeek:ApplyStartSpotPayload(payload, clearMissingSpot)
 	payload = payload or {}
 	self.startRadius = clamp(payload.ar, MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
+	self.areaRadius = clamp(payload.br, math.max(MIN_AREA_RADIUS, self:GetStartRadius()), MAX_AREA_RADIUS, self.areaRadius)
 
 	local mapId = tonumber(payload.am)
 	local x = tonumber(payload.ax)
@@ -787,7 +1103,8 @@ function HideSeek:ClearStartSpot()
 	self.startLocationUnavailableWarned = false
 	self:ClearStartSpotWaypoint()
 	self:CancelSafeAttempt()
-	self:HideHomeStatus()
+	self:CancelOutOfBoundsCountdown()
+	self:HideAreaVisuals()
 end
 
 function HideSeek:CaptureStartSpot()
@@ -825,12 +1142,13 @@ function HideSeek:CaptureStartSpot()
 		x = self.startX,
 		y = self.startY,
 		radius = self:GetStartRadius(),
+		areaRadius = self:GetAreaRadius(),
 	})
 	return true
 end
 
 function HideSeek:GetStartSpotDetailText()
-	local text = "Start radius " .. self:GetStartRadius()
+	local text = "Start radius " .. self:GetStartRadius() .. ", Play radius " .. self:GetAreaRadius()
 
 	if self:HasStartSpot() then
 		text = text .. " @ " .. self.startX .. ", " .. self.startY
@@ -892,6 +1210,20 @@ function HideSeek:IsAtStartSpot()
 	return distance <= self:GetStartRadius(), distance
 end
 
+function HideSeek:IsInsidePlayArea()
+	local distance, reason, wrongMap = self:GetStartSpotDistance()
+
+	if wrongMap then
+		return false, reason
+	end
+
+	if not distance then
+		return nil, reason
+	end
+
+	return distance <= self:GetAreaRadius(), distance
+end
+
 function HideSeek:GetStartSpotNavigationText()
 	if not self:HasStartSpot() then
 		return "Start: not set"
@@ -907,6 +1239,23 @@ function HideSeek:GetStartSpotNavigationText()
 	end
 
 	return "Start: " .. tostring(reasonOrDistance or "away")
+end
+
+function HideSeek:GetPlayAreaNavigationText()
+	if not self:HasStartSpot() then
+		return "Area: not set"
+	end
+
+	local insideArea, reasonOrDistance = self:IsInsidePlayArea()
+	if insideArea == true then
+		return "Area: inside"
+	end
+
+	if type(reasonOrDistance) == "number" then
+		return "Area: outside by " .. formatMapDistance(reasonOrDistance - self:GetAreaRadius())
+	end
+
+	return "Area: " .. tostring(reasonOrDistance or "outside")
 end
 
 function HideSeek:CanUseStartSpotWaypoint()
@@ -966,6 +1315,107 @@ function HideSeek:ClearStartSpotWaypoint()
 	self.startWaypointSet = false
 end
 
+function HideSeek:EnsureMapAreaOverlay(parent)
+	parent = parent or getWorldMapOverlayParent()
+	if not parent then
+		return nil
+	end
+
+	if not mapAreaOverlay then
+		mapAreaOverlay = createAreaOverlay("WEPHideSeekMapAreaOverlay", parent, AREA_MAP_TINT_ALPHA)
+	end
+
+	return prepareAreaOverlay(mapAreaOverlay, parent, AREA_MAP_TINT_ALPHA)
+end
+
+function HideSeek:EnsureMinimapAreaOverlay(parent)
+	parent = parent or Minimap
+	if not parent then
+		return nil
+	end
+
+	if not minimapAreaOverlay then
+		minimapAreaOverlay = createAreaOverlay("WEPHideSeekMinimapAreaOverlay", parent, AREA_MINIMAP_TINT_ALPHA)
+	end
+
+	return prepareAreaOverlay(minimapAreaOverlay, parent, AREA_MINIMAP_TINT_ALPHA)
+end
+
+function HideSeek:HideAreaVisuals()
+	hideAreaOverlay(mapAreaOverlay)
+	hideAreaOverlay(minimapAreaOverlay)
+end
+
+function HideSeek:UpdateWorldMapAreaOverlay()
+	if not self:HasStartSpot() or not WorldMapFrame or not WorldMapFrame.IsShown or not WorldMapFrame:IsShown() then
+		hideAreaOverlay(mapAreaOverlay)
+		return
+	end
+
+	local shownMapId = getShownWorldMapId()
+	if shownMapId and shownMapId ~= tonumber(self.startMapId) then
+		hideAreaOverlay(mapAreaOverlay)
+		return
+	end
+
+	local parent = getWorldMapOverlayParent()
+	local overlay = self:EnsureMapAreaOverlay(parent)
+	if not overlay or not parent.GetWidth or not parent.GetHeight then
+		return
+	end
+
+	local width = parent:GetWidth()
+	local height = parent:GetHeight()
+	local radius = self:GetAreaRadius() / 100
+	local centerX = (self.startX / 100) * width
+	local centerY = (self.startY / 100) * height
+
+	updateAreaOverlay(overlay, centerX, centerY, width * radius, height * radius, width, height, 12, 1)
+end
+
+function HideSeek:UpdateMinimapAreaOverlay()
+	if not self:HasStartSpot() or not Minimap or not Minimap.GetWidth or not Minimap.GetHeight then
+		hideAreaOverlay(minimapAreaOverlay)
+		return
+	end
+
+	local overlay = self:EnsureMinimapAreaOverlay(Minimap)
+	if not overlay then
+		return
+	end
+
+	local width = Minimap:GetWidth()
+	local height = Minimap:GetHeight()
+	local mapId, x, y = self:GetCurrentMapPosition()
+
+	if not mapId or not x or not y or mapId ~= tonumber(self.startMapId) then
+		updateAreaOverlay(overlay, width * 2, height * 2, width * 0.01, height * 0.01, width, height, 0, 0)
+		return
+	end
+
+	local minimapRadius = math.min(width, height) * 0.42
+	local mapRadius = math.max(1, self:GetAreaRadius())
+	local scale = minimapRadius / mapRadius
+	local centerX = (width / 2) + ((self.startX - x) * scale)
+	local centerY = (height / 2) + ((self.startY - y) * scale)
+	local markerX = clampCoordinate(centerX, 4, width - 4)
+	local markerY = clampCoordinate(centerY, 4, height - 4)
+	local markerAlpha = (markerX == centerX and markerY == centerY) and 1 or 0.55
+
+	updateAreaOverlay(overlay, centerX, centerY, minimapRadius, minimapRadius, width, height, 8, markerAlpha)
+	setOverlayMarker(overlay.marker, overlay, markerX, markerY, 8, markerAlpha)
+end
+
+function HideSeek:RefreshAreaVisuals()
+	if not self:ShouldMonitorPlayArea() then
+		self:HideAreaVisuals()
+		return
+	end
+
+	self:UpdateWorldMapAreaOverlay()
+	self:UpdateMinimapAreaOverlay()
+end
+
 function HideSeek:ShowHomeStatus(text)
 	local frame = ensureHomeStatusFrame()
 	if not frame then
@@ -981,6 +1431,24 @@ end
 function HideSeek:HideHomeStatus()
 	if homeStatusFrame then
 		homeStatusFrame:Hide()
+	end
+end
+
+function HideSeek:ShowBoundaryStatus(text)
+	local frame = ensureBoundaryStatusFrame()
+	if not frame then
+		WEP:Log("HideSeek", "boundary_status_unavailable", nil, "warn")
+		return false
+	end
+
+	frame.text:SetText(text)
+	frame:Show()
+	return true
+end
+
+function HideSeek:HideBoundaryStatus()
+	if boundaryStatusFrame then
+		boundaryStatusFrame:Hide()
 	end
 end
 
@@ -1003,6 +1471,22 @@ function HideSeek:ShouldMonitorHomeSpot()
 	return self:IsActiveHider(self:GetPlayer(Player.GetFullName()))
 end
 
+function HideSeek:ShouldMonitorPlayArea()
+	if not self:HasStartSpot()
+		or not self:IsParticipant()
+		or self.outOfBoundsReported
+		or (self.status ~= STATUS_HIDING and self.status ~= STATUS_SEEKING)
+	then
+		return false
+	end
+
+	if self:IsSeeker() then
+		return true
+	end
+
+	return self:IsActiveHider(self:GetPlayer(Player.GetFullName()))
+end
+
 function HideSeek:StartHomeMonitor()
 	self.homeMonitorToken = (self.homeMonitorToken or 0) + 1
 	local token = self.homeMonitorToken
@@ -1012,14 +1496,32 @@ function HideSeek:StartHomeMonitor()
 			return
 		end
 
-		if not self:ShouldMonitorHomeSpot() then
+		self:RefreshAreaVisuals()
+
+		local shouldMonitorHome = self:ShouldMonitorHomeSpot()
+		local shouldMonitorArea = self:ShouldMonitorPlayArea()
+
+		if not shouldMonitorHome then
 			self:CancelSafeAttempt()
+		end
+
+		if not shouldMonitorArea then
+			self:CancelOutOfBoundsCountdown()
+		end
+
+		if not shouldMonitorHome and not shouldMonitorArea then
 			return
 		end
 
-		self:CheckHomeSpot()
+		if shouldMonitorHome then
+			self:CheckHomeSpot()
+		end
 
-		if self.homeMonitorToken == token and self:ShouldMonitorHomeSpot() then
+		if shouldMonitorArea then
+			self:CheckPlayArea()
+		end
+
+		if self.homeMonitorToken == token and (self:ShouldMonitorHomeSpot() or self:ShouldMonitorPlayArea()) then
 			Timer.After(HOME_CHECK_INTERVAL_SECONDS, check)
 		end
 	end
@@ -1031,6 +1533,8 @@ function HideSeek:StopHomeMonitor()
 	self.homeMonitorToken = (self.homeMonitorToken or 0) + 1
 	self.startLocationUnavailableWarned = false
 	self:CancelSafeAttempt()
+	self:CancelOutOfBoundsCountdown()
+	self:HideAreaVisuals()
 end
 
 function HideSeek:CheckHomeSpot()
@@ -1075,6 +1579,106 @@ function HideSeek:CancelSafeAttempt()
 	self.safeAttemptActive = false
 	self.safeAttemptStartedAt = nil
 	self:HideHomeStatus()
+end
+
+function HideSeek:CancelOutOfBoundsCountdown()
+	self.outOfBoundsEndsAt = nil
+	self:HideBoundaryStatus()
+end
+
+function HideSeek:CheckPlayArea()
+	local insideArea, reasonOrDistance = self:IsInsidePlayArea()
+
+	if insideArea == nil then
+		self:CancelOutOfBoundsCountdown()
+		return
+	end
+
+	if insideArea then
+		self:CancelOutOfBoundsCountdown()
+		return
+	end
+
+	self:StartOutOfBoundsCountdown(reasonOrDistance)
+end
+
+function HideSeek:StartOutOfBoundsCountdown(distance)
+	if self.outOfBoundsReported then
+		return
+	end
+
+	local now = Timer.Now()
+	if not self.outOfBoundsEndsAt then
+		self.outOfBoundsEndsAt = now + OUT_OF_BOUNDS_SECONDS
+		WEP:Print("Return to the Hide and Seek play area within", OUT_OF_BOUNDS_SECONDS .. "s.")
+		playSound("wep_alert")
+	end
+
+	local remaining = self.outOfBoundsEndsAt - now
+	if remaining > 0 then
+		local outsideBy = ""
+
+		if type(distance) == "number" then
+			outsideBy = "\nOutside by " .. formatMapDistance(distance - self:GetAreaRadius())
+		end
+
+		self:ShowBoundaryStatus("Return to play area\n" .. remaining .. outsideBy)
+		return
+	end
+
+	local insideArea = self:IsInsidePlayArea()
+	if insideArea == false then
+		self:FailOutOfBounds()
+	else
+		self:CancelOutOfBoundsCountdown()
+	end
+end
+
+function HideSeek:FailOutOfBounds()
+	if self.outOfBoundsReported then
+		return false
+	end
+
+	self.outOfBoundsReported = true
+	self.outOfBoundsEndsAt = nil
+	self:HideBoundaryStatus()
+
+	local playerName = Player.GetFullName()
+
+	if self:IsSeeker() then
+		WEP:Print("You left the Hide and Seek play area. The seeker loses.")
+
+		if self:IsHost() then
+			self:FinishGame("seeker_lost", true)
+		else
+			self:Broadcast(MSG_OUT_OF_BOUNDS, {
+				g = self.gameId,
+				p = playerName,
+				r = "seeker",
+			})
+		end
+
+		return true
+	end
+
+	local player = self:GetPlayer(playerName)
+	if not self:IsActiveHider(player) then
+		return false
+	end
+
+	WEP:Print("You left the Hide and Seek play area and are counted as found.")
+
+	if self:IsHost() then
+		self:MarkFound(player.name, "the boundary", true)
+	else
+		self:Broadcast(MSG_OUT_OF_BOUNDS, {
+			g = self.gameId,
+			p = player.name,
+			r = "hider",
+		})
+	end
+
+	return true
 end
 
 function HideSeek:StartSafeAttempt()
@@ -1758,6 +2362,10 @@ function HideSeek:GetTimerText()
 			return "Result: hiders win"
 		end
 
+		if self.resultReason == "seeker_lost" then
+			return "Result: hiders win"
+		end
+
 		return "Result: ended"
 	end
 
@@ -1872,7 +2480,7 @@ function HideSeek:EnsureTrackerWindow()
 		name = "WEPHideSeekTrackerWindow",
 		title = "Hide and Seek",
 		width = 280,
-		height = 240,
+		height = 255,
 		level = 85,
 		resizable = true,
 		collapsible = true,
@@ -1924,6 +2532,11 @@ function HideSeek:EnsureTrackerWindow()
 	window.startText:SetPoint("TOPLEFT", window.hidingText, "BOTTOMLEFT", 0, -6)
 	window.startText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
 	window.startText:SetJustifyH("LEFT")
+
+	window.areaText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.areaText:SetPoint("TOPLEFT", window.startText, "BOTTOMLEFT", 0, -6)
+	window.areaText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.areaText:SetJustifyH("LEFT")
 
 	window.revealButton = Form.CreateButton(window.footer, {
 		text = "Reveal",
@@ -2132,6 +2745,7 @@ function HideSeek:RefreshTrackerWindow()
 	window.seekerText:SetText("Seeking: " .. (seeker or "Not chosen"))
 	window.hidingText:SetText("Hiding: " .. hidingText)
 	window.startText:SetText(self:GetStartSpotNavigationText())
+	window.areaText:SetText(self:GetPlayAreaNavigationText())
 	if window.revealButton then
 		if self:IsSeeker()
 			and self.status == STATUS_SEEKING
@@ -2267,6 +2881,13 @@ function HideSeek:EnsureWindow()
 	})
 	window.applyButton:SetPoint("LEFT", window.startRadiusInput.editBox, "RIGHT", 12, 0)
 
+	window.areaRadiusInput = Form.CreateInput(content, {
+		label = "Play radius",
+		width = 96,
+		numeric = true,
+	})
+	window.areaRadiusInput:SetPoint("TOPLEFT", window.hideInput, "BOTTOMLEFT", 0, -8)
+
 	window.seekerInput = Form.CreateInput(content, {
 		label = "Seeker",
 		width = 170,
@@ -2274,7 +2895,7 @@ function HideSeek:EnsureWindow()
 			self:SetSeekerFromWindow()
 		end,
 	})
-	window.seekerInput:SetPoint("TOPLEFT", window.hideInput, "BOTTOMLEFT", 0, -8)
+	window.seekerInput:SetPoint("TOPLEFT", window.areaRadiusInput, "TOPRIGHT", 12, 0)
 
 	window.seekerButton = Form.CreateButton(content, {
 		text = "Set",
@@ -2393,6 +3014,7 @@ function HideSeek:RefreshWindow()
 	setInputValueIfNotFocused(window.seekInput, self.seekSeconds)
 	setInputValueIfNotFocused(window.starRevealInput, self.starRevealUses)
 	setInputValueIfNotFocused(window.startRadiusInput, self:GetStartRadius())
+	setInputValueIfNotFocused(window.areaRadiusInput, self:GetAreaRadius())
 	setInputValueIfNotFocused(window.seekerInput, self:GetSelectedSeeker() or "")
 
 	setInputEnabled(window.inviteInput, canHostControl)
@@ -2400,6 +3022,7 @@ function HideSeek:RefreshWindow()
 	setInputEnabled(window.seekInput, canHostControl)
 	setInputEnabled(window.starRevealInput, canHostControl)
 	setInputEnabled(window.startRadiusInput, canHostControl)
+	setInputEnabled(window.areaRadiusInput, canHostControl)
 	setInputEnabled(window.seekerInput, canHostControl)
 	setButtonEnabled(window.inviteButton, canHostControl)
 	setButtonEnabled(window.applyButton, canHostControl)
@@ -2520,6 +3143,7 @@ function HideSeek:ReadWindowSettings()
 	self.seekSeconds = clamp(window.seekInput:GetValue(), MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self.starRevealUses = clamp(window.starRevealInput:GetValue(), MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 	self.startRadius = clamp(window.startRadiusInput:GetValue(), MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
+	self.areaRadius = clamp(window.areaRadiusInput:GetValue(), math.max(MIN_AREA_RADIUS, self:GetStartRadius()), MAX_AREA_RADIUS, self.areaRadius)
 
 	if not self:ReadWindowSeeker() then
 		return false
@@ -2530,6 +3154,7 @@ function HideSeek:ReadWindowSettings()
 		seekSeconds = self.seekSeconds,
 		starRevealUses = self.starRevealUses,
 		startRadius = self.startRadius,
+		areaRadius = self.areaRadius,
 		seeker = self.seeker or "random",
 	})
 	return true
@@ -2551,13 +3176,14 @@ function HideSeek:ApplyWindowSettings()
 		return
 	end
 
-	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "start", self:GetStartRadius(), "star reveals", self.starRevealUses, "seeker", self.seeker or "random")
+	WEP:Print("Hide and Seek settings:", "hide", formatDuration(self.hideSeconds), "seek", formatDuration(self.seekSeconds), "start", self:GetStartRadius(), "play", self:GetAreaRadius(), "star reveals", self.starRevealUses, "seeker", self.seeker or "random")
 	WEP:Log("HideSeek", "settings_applied", {
 		gameId = self.gameId or "none",
 		hideSeconds = self.hideSeconds,
 		seekSeconds = self.seekSeconds,
 		starRevealUses = self.starRevealUses,
 		startRadius = self.startRadius,
+		areaRadius = self.areaRadius,
 		seeker = self.seeker or "random",
 	})
 	self:BroadcastState()
@@ -2640,6 +3266,7 @@ function HideSeek:InvitePlayer(target)
 		ss = self.seekSeconds,
 		ru = self.starRevealUses,
 		ar = self:GetStartRadius(),
+		br = self:GetAreaRadius(),
 	})
 
 	if not ok then
@@ -2670,6 +3297,7 @@ function HideSeek:OnInviteRequest(request)
 	local seekSeconds = clamp(data.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	local starRevealUses = clamp(data.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 	local startRadius = clamp(data.ar, MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
+	local areaRadius = clamp(data.br, math.max(MIN_AREA_RADIUS, startRadius), MAX_AREA_RADIUS, self.areaRadius)
 
 	if isBlank(data.g) then
 		WEP:Log("HideSeek", "invite_request_ignored", {
@@ -2706,6 +3334,8 @@ function HideSeek:OnInviteRequest(request)
 		.. formatDuration(seekSeconds)
 		.. ", Start radius: "
 		.. startRadius
+		.. ", Play radius: "
+		.. areaRadius
 
 	if starRevealUses > 0 then
 		message = message .. ", Star reveals: " .. starRevealUses
@@ -2763,6 +3393,7 @@ function HideSeek:OnInviteRequest(request)
 				self.seekSeconds = seekSeconds
 				self.starRevealUses = starRevealUses
 				self.startRadius = startRadius
+				self.areaRadius = areaRadius
 				self.status = STATUS_LOBBY
 				self.seeker = nil
 				self:ResetRoster()
@@ -2959,6 +3590,7 @@ function HideSeek:OnStateMessage(message)
 		host = self.host,
 		starRevealUses = self.starRevealUses,
 		startRadius = self.startRadius,
+		areaRadius = self.areaRadius,
 	})
 end
 
@@ -3011,6 +3643,7 @@ function HideSeek:OnStartSpotRequestMessage(message)
 	self.seekSeconds = clamp(payload.ss, MIN_SEEK_SECONDS, MAX_SEEK_SECONDS, self.seekSeconds)
 	self.starRevealUses = clamp(payload.ru, MIN_STAR_REVEAL_USES, MAX_STAR_REVEAL_USES, self.starRevealUses)
 	self.startRadius = clamp(payload.ar, MIN_START_RADIUS, MAX_START_RADIUS, self.startRadius)
+	self.areaRadius = clamp(payload.br, math.max(MIN_AREA_RADIUS, self:GetStartRadius()), MAX_AREA_RADIUS, self.areaRadius)
 
 	if not self:CaptureStartSpot() then
 		return
@@ -3113,6 +3746,7 @@ function HideSeek:StartGameWithStartSpot(startedAt)
 		seekSeconds = self.seekSeconds,
 		starRevealUses = self.starRevealUses,
 		startRadius = self.startRadius,
+		areaRadius = self.areaRadius,
 		startMapId = self.startMapId,
 	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, startedAt)
@@ -3267,6 +3901,7 @@ function HideSeek:OnStartMessage(message)
 		seeker = self.seeker or "none",
 		starRevealUses = self.starRevealUses,
 		startRadius = self.startRadius,
+		areaRadius = self.areaRadius,
 		startMapId = self.startMapId or "none",
 	})
 	self:BeginHiding(self.hideSeconds, self.seekSeconds, tonumber(payload.t) or Timer.Now())
@@ -3282,6 +3917,8 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 	self:CancelStarReveal()
 	self:ClearAllRaidTargets()
 	self.startLocationUnavailableWarned = false
+	self.outOfBoundsReported = false
+	self.outOfBoundsEndsAt = nil
 	self.timerToken = (self.timerToken or 0) + 1
 	local token = self.timerToken
 	local remaining = self.hideEndsAt - Timer.Now()
@@ -3302,6 +3939,7 @@ function HideSeek:BeginHiding(hideSeconds, seekSeconds, startedAt)
 	})
 
 	self:SetStartSpotWaypoint()
+	self:StartHomeMonitor()
 
 	if self:IsSeeker() then
 		ScreenOverlay.SetBlackoutPercentage(100)
@@ -3349,9 +3987,9 @@ function HideSeek:BeginSeeking()
 	if self:IsSeeker() then
 		ScreenOverlay.HideBlackout()
 		self:HideSeekerUI()
-		WEP:Print("Find a hider, target them, then return to the starting spot.")
+		WEP:Print("Find a hider, target them, then return to the starting spot. Stay inside the play area.")
 	else
-		WEP:Print("The seeker is hunting. Reach the starting spot while the seeker is away.")
+		WEP:Print("The seeker is hunting. Reach the starting spot while the seeker is away. Stay inside the play area.")
 	end
 
 	Timer.After(self.seekSeconds, function()
@@ -3708,6 +4346,58 @@ function HideSeek:OnSafeMessage(message)
 	self:ProcessSafeRequest(playerName, message.sender)
 end
 
+function HideSeek:OnOutOfBoundsMessage(message)
+	local payload = message.payload or {}
+
+	if not self:IsHost() then
+		return
+	end
+
+	if payload.g ~= self.gameId or (self.status ~= STATUS_HIDING and self.status ~= STATUS_SEEKING) then
+		WEP:Log("HideSeek", "out_of_bounds_message_ignored", {
+			sender = message.sender,
+			gameId = payload.g or "none",
+			status = self.status or "none",
+			reason = "game or state mismatch",
+		}, "warn")
+		return
+	end
+
+	local playerName = payload.p or message.sender
+	if not messageSentBy(message, playerName) then
+		WEP:Log("HideSeek", "out_of_bounds_message_ignored", {
+			sender = message.sender,
+			player = playerName or "none",
+			reason = "sender mismatch",
+		}, "warn")
+		return
+	end
+
+	if tostring(payload.r or "") == "seeker" or namesMatch(playerName, self.seeker) then
+		if not namesMatch(playerName, self.seeker) then
+			return
+		end
+
+		WEP:Log("HideSeek", "seeker_out_of_bounds", {
+			gameId = self.gameId,
+			seeker = playerName,
+		})
+		self:FinishGame("seeker_lost", true)
+		return
+	end
+
+	local player = self:GetPlayer(playerName)
+	if not self:IsActiveHider(player) then
+		return
+	end
+
+	WEP:Log("HideSeek", "hider_out_of_bounds", {
+		gameId = self.gameId,
+		player = player.name,
+	})
+	self:MarkFound(player.name, "the boundary", true)
+end
+
 function HideSeek:OnSeekerSpotMessage(message)
 	local payload = message.payload or {}
 
@@ -3780,6 +4470,8 @@ function HideSeek:FinishGame(reason, broadcast, nextSeeker)
 		WEP:Print("Hide and Seek ended: hiders win.")
 	elseif reason == "time" then
 		WEP:Print("Hide and Seek ended: hiders win.")
+	elseif reason == "seeker_lost" then
+		WEP:Print("Hide and Seek ended: seeker left the play area. Hiders win.")
 	else
 		WEP:Print("Hide and Seek ended.")
 	end
