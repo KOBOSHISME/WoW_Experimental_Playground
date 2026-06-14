@@ -40,6 +40,14 @@ This may change as the project finds its direction.
 
 ## Communication Diagnostics
 
+Open the default feature panel with:
+
+```text
+/wep
+```
+
+The panel lists registered features and lets you turn each one on or off.
+
 The addon includes a small hidden communication diagnostic feature:
 
 ```text

@@ -47,6 +47,16 @@ end
 function Diagnostics:HandleSlash(input)
 	local args = splitCommand(input)
 
+	if not args[1] then
+		self:ShowDefaultUI()
+		return
+	end
+
+	if args[1] == "help" then
+		self:PrintHelp()
+		return
+	end
+
 	if args[1] == "tools" or args[1] == "tool" then
 		if WEP.ToolDebug and WEP.ToolDebug.HandleSlash then
 			WEP.ToolDebug:HandleSlash(args)
@@ -105,8 +115,17 @@ function Diagnostics:HandleSlash(input)
 	self:PrintHelp()
 end
 
+function Diagnostics:ShowDefaultUI()
+	if WEP.FeaturePanel and WEP.FeaturePanel.ShowWindow then
+		WEP.FeaturePanel:ShowWindow()
+	else
+		self:PrintHelp()
+	end
+end
+
 function Diagnostics.PrintHelp()
 	WEP:Print("Commands:")
+	WEP:Print("/wep - Open the feature panel.")
 	WEP:Print("/wep comm status - Show communication status.")
 	WEP:Print("/wep comm ping - Send a hidden discovery ping.")
 	WEP:Print("/wep comm debug [on|off] - Toggle communication debug messages.")

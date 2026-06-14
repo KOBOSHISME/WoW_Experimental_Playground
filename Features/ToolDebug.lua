@@ -3,6 +3,11 @@ local _, WEP = ...
 local ToolDebug = {}
 WEP.ToolDebug = ToolDebug
 
+local FEATURE_ID = "toolDebug"
+
+ToolDebug.title = "Tool Debug"
+ToolDebug.description = "Commands for checking reusable addon tools."
+
 local Timer = WEP.Tools.Timer
 local Player = WEP.Tools.Player
 local ChatChannels = WEP.Tools.ChatChannels
@@ -99,6 +104,10 @@ local function formatUnitSummary(unit)
 		.. npcId
 end
 
+function ToolDebug:IsEnabled()
+	return WEP:IsFeatureEnabled(FEATURE_ID)
+end
+
 function ToolDebug:Initialize()
 	if self.initialized then
 		return
@@ -108,6 +117,10 @@ function ToolDebug:Initialize()
 
 	if Requests then
 		Requests.RegisterRequestHandler("debug", function(request)
+			if not self:IsEnabled() then
+				return
+			end
+
 			WEP:Print(
 				"Debug request:",
 				request.id,
@@ -121,6 +134,10 @@ function ToolDebug:Initialize()
 		end)
 
 		Requests.RegisterResponseHandler("debug", function(response)
+			if not self:IsEnabled() then
+				return
+			end
+
 			WEP:Print(
 				"Debug response:",
 				response.id,
@@ -136,6 +153,11 @@ function ToolDebug:Initialize()
 end
 
 function ToolDebug:HandleSlash(args)
+	if not self:IsEnabled() then
+		WEP:Print("Tool Debug is disabled. Open /wep to enable it.")
+		return
+	end
+
 	local toolName = args[2]
 
 	if not toolName or toolName == "help" then
@@ -922,4 +944,5 @@ function ToolDebug.PrintRequestStatus()
 	end
 end
 
+WEP:RegisterFeature(FEATURE_ID, ToolDebug)
 WEP:RegisterModule("ToolDebug", ToolDebug)

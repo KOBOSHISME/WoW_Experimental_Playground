@@ -23,6 +23,7 @@ Tools\Environment.lua
 Tools\Requests.lua
 Comm\Protocol.lua
 Comm\Transport.lua
+Features\FeaturePanel.lua
 Features\Diagnostics.lua
 Features\ToolDebug.lua
 Features\HideSeek.lua

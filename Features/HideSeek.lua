@@ -11,6 +11,11 @@ local HideSeek = {
 
 WEP.HideSeek = HideSeek
 
+local FEATURE_ID = "hideSeek"
+
+HideSeek.title = "Hide and Seek"
+HideSeek.description = "Addon-managed challenge lobby and seeker UI."
+
 local Timer = WEP.Tools.Timer
 local Player = WEP.Tools.Player
 local Requests = WEP.Tools.Requests
@@ -178,6 +183,10 @@ local function ensureCountdownFrame()
 	return countdownFrame
 end
 
+function HideSeek:IsEnabled()
+	return WEP:IsFeatureEnabled(FEATURE_ID)
+end
+
 function HideSeek:Initialize()
 	if self.initialized then
 		return
@@ -197,41 +206,73 @@ function HideSeek:Initialize()
 	end
 
 	Requests.RegisterRequestHandler(REQUEST_INVITE, function(request)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnInviteRequest(request)
 	end)
 
 	Requests.RegisterResponseHandler(REQUEST_INVITE, function(response)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnInviteResponse(response)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_STATE, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnStateMessage(message)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_ROSTER, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnRosterMessage(message)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_START, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnStartMessage(message)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_FOUND, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnFoundMessage(message)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_END, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnEndMessage(message)
 	end)
 
 	WEP.Comm:RegisterHandler(MSG_LEAVE, function(message)
+		if not self:IsEnabled() then
+			return
+		end
+
 		self:OnLeaveMessage(message)
 	end)
 
 	self.frame = CreateFrame("Frame")
 	self.frame:RegisterEvent("PLAYER_TARGET_CHANGED")
 	self.frame:SetScript("OnEvent", function(_, event)
-		if event == "PLAYER_TARGET_CHANGED" then
+		if event == "PLAYER_TARGET_CHANGED" and self:IsEnabled() then
 			self:OnTargetChanged()
 		end
 	end)
@@ -1638,7 +1679,26 @@ function HideSeek:PrintStatus()
 	WEP:Print("Roster:", self:GetRosterText())
 end
 
+function HideSeek:OnDisabled()
+	if self.gameId then
+		self:LeaveGame()
+	else
+		self:HideCountdown()
+		ScreenOverlay.HideBlackout()
+		self:RestoreSeekerUI()
+	end
+
+	if gameWindow then
+		gameWindow:Hide()
+	end
+end
+
 function HideSeek:HandleSlash(args)
+	if not self:IsEnabled() then
+		WEP:Print("Hide and Seek is disabled. Open /wep to enable it.")
+		return
+	end
+
 	local action = args[2]
 
 	if not action or action == "menu" then
@@ -1675,4 +1735,5 @@ function HideSeek:HandleSlash(args)
 	WEP:Print("Usage: /wep hide status|invite|settings|start|leave")
 end
 
+WEP:RegisterFeature(FEATURE_ID, HideSeek)
 WEP:RegisterModule("HideSeek", HideSeek)

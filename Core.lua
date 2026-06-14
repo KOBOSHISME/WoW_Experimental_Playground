@@ -5,6 +5,8 @@ WEP.printPrefix = "WEP"
 WEP.version = "0.1.0"
 WEP.modules = WEP.modules or {}
 WEP.moduleOrder = WEP.moduleOrder or {}
+WEP.features = WEP.features or {}
+WEP.featureOrder = WEP.featureOrder or {}
 WEP.Utils = WEP.Utils or {}
 WEP.Tools = WEP.Tools or {}
 
@@ -15,6 +17,10 @@ local DEFAULTS = {
 		discoveryChannel = true,
 		addonMessages = true,
 	},
+	features = {
+		hideSeek = true,
+		toolDebug = true,
+	},
 }
 
 function WEP:RegisterModule(name, module)
@@ -23,6 +29,79 @@ function WEP:RegisterModule(name, module)
 	end
 
 	self.modules[name] = module
+end
+
+function WEP:RegisterFeature(id, feature)
+	if type(id) ~= "string" or id == "" then
+		return false
+	end
+
+	if not self.features[id] then
+		self.featureOrder[#self.featureOrder + 1] = id
+	end
+
+	feature = feature or {}
+	feature.id = id
+	self.features[id] = feature
+	return true
+end
+
+function WEP:IsFeatureEnabled(id)
+	local features = self.db and self.db.features
+
+	if not features or features[id] == nil then
+		return true
+	end
+
+	return features[id] == true
+end
+
+function WEP:SetFeatureEnabled(id, enabled)
+	local feature = self.features[id]
+
+	if not feature then
+		return false, "unknown feature"
+	end
+
+	WEPDB = WEPDB or {}
+	self.db = self.db or WEPDB
+	self.db.features = self.db.features or {}
+
+	enabled = enabled == true
+	local wasEnabled = self:IsFeatureEnabled(id)
+	self.db.features[id] = enabled
+
+	if wasEnabled ~= enabled then
+		local callback = enabled and feature.OnEnabled or feature.OnDisabled
+
+		if type(callback) == "function" then
+			local ok, err = pcall(callback, feature)
+			if not ok then
+				self:Print("Feature toggle failed:", feature.title or id, err)
+			end
+		end
+	end
+
+	return true
+end
+
+function WEP:GetFeatures()
+	local features = {}
+
+	for _, id in ipairs(self.featureOrder) do
+		local feature = self.features[id]
+
+		if feature then
+			features[#features + 1] = {
+				id = id,
+				title = feature.title or id,
+				description = feature.description or "",
+				enabled = self:IsFeatureEnabled(id),
+			}
+		end
+	end
+
+	return features
 end
 
 function WEP:Print(...)
