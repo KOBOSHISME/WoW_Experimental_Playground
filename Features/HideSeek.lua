@@ -57,6 +57,9 @@ local SEEKER_UI_GROUPS = {
 
 local countdownFrame
 local gameWindow
+local trackerWindow
+
+local TRACKER_MAX_NAMES = 4
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
@@ -762,6 +765,163 @@ local function setInputValueIfNotFocused(input, value)
 	input:SetValue(value)
 end
 
+local function formatTrackerNames(names)
+	if #names == 0 then
+		return "none"
+	end
+
+	local values = {}
+	local limit = math.min(#names, TRACKER_MAX_NAMES)
+
+	for index = 1, limit do
+		values[#values + 1] = names[index]
+	end
+
+	if #names > limit then
+		values[#values + 1] = "+" .. (#names - limit)
+	end
+
+	return table.concat(values, ", ")
+end
+
+function HideSeek:GetTrackerNames()
+	local playing = {}
+	local hiders = {}
+	local seeker
+	local rolesAssigned = self.seeker and self.status ~= STATUS_LOBBY and self.status ~= STATUS_IDLE
+
+	for _, key in ipairs(self.playerOrder) do
+		local player = self.players[key]
+
+		if player then
+			local name = shortName(player.name)
+			playing[#playing + 1] = name
+
+			if self.seeker and namesMatch(player.name, self.seeker) then
+				seeker = name
+			elseif rolesAssigned and not player.found then
+				hiders[#hiders + 1] = name
+			end
+		end
+	end
+
+	return playing, seeker, hiders
+end
+
+function HideSeek:EnsureTrackerWindow()
+	if trackerWindow then
+		return trackerWindow
+	end
+
+	if not WindowTool or not Form then
+		WEP:Log("HideSeek", "tracker_window_unavailable", nil, "error")
+		return nil
+	end
+
+	local window, err = WindowTool.Create({
+		name = "WEPHideSeekTrackerWindow",
+		title = "Hide and Seek",
+		width = 280,
+		height = 220,
+		level = 85,
+		onShow = function()
+			self:RefreshTrackerWindow()
+			self:ScheduleWindowRefresh()
+		end,
+	})
+
+	if not window then
+		WEP:Log("HideSeek", "tracker_window_failed", {
+			error = err,
+		}, "error")
+		return nil
+	end
+
+	if window.frame.closeButton then
+		window.frame.closeButton:Hide()
+	end
+
+	local content = window.content
+
+	window.statusText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
+	window.statusText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.statusText:SetJustifyH("LEFT")
+
+	window.timerText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+	window.timerText:SetPoint("TOPLEFT", window.statusText, "BOTTOMLEFT", 0, -8)
+	window.timerText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.timerText:SetJustifyH("LEFT")
+
+	window.playingText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.playingText:SetPoint("TOPLEFT", window.timerText, "BOTTOMLEFT", 0, -10)
+	window.playingText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.playingText:SetJustifyH("LEFT")
+
+	window.seekerText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.seekerText:SetPoint("TOPLEFT", window.playingText, "BOTTOMLEFT", 0, -6)
+	window.seekerText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.seekerText:SetJustifyH("LEFT")
+
+	window.hidingText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.hidingText:SetPoint("TOPLEFT", window.seekerText, "BOTTOMLEFT", 0, -6)
+	window.hidingText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.hidingText:SetJustifyH("LEFT")
+
+	window.leaveButton = Form.CreateButton(window.footer, {
+		text = "Leave",
+		width = 72,
+		height = 22,
+		onClick = function()
+			self:LeaveGame()
+		end,
+	})
+	window.leaveButton:SetPoint("RIGHT", window.footer, "RIGHT", 0, 0)
+
+	trackerWindow = window
+	WEP:Log("HideSeek", "tracker_window_created")
+	return trackerWindow
+end
+
+function HideSeek:RefreshTrackerWindow()
+	if not self.gameId or self.status == STATUS_IDLE then
+		if trackerWindow and trackerWindow:IsShown() then
+			trackerWindow:Hide()
+			WEP:Log("HideSeek", "tracker_window_hidden")
+		end
+
+		return
+	end
+
+	local window = self:EnsureTrackerWindow()
+	if not window then
+		return
+	end
+
+	local playing, seeker, hiders = self:GetTrackerNames()
+	local hidingText = "Not started"
+
+	if self.seeker and self.status ~= STATUS_LOBBY and self.status ~= STATUS_IDLE then
+		hidingText = formatTrackerNames(hiders)
+	end
+
+	window.statusText:SetText(getStatusLabel(self.status))
+	window.timerText:SetText(self:GetTimerText())
+	window.playingText:SetText("Playing: " .. formatTrackerNames(playing))
+	window.seekerText:SetText("Seeking: " .. (seeker or "Not chosen"))
+	window.hidingText:SetText("Hiding: " .. hidingText)
+	setButtonEnabled(window.leaveButton, self.gameId ~= nil)
+
+	if not window:IsShown() then
+		window:Show()
+		WEP:Log("HideSeek", "tracker_window_shown", {
+			gameId = self.gameId,
+		})
+	end
+
+	self:ScheduleWindowRefresh()
+end
+
 function HideSeek:EnsureWindow()
 	if gameWindow then
 		return gameWindow
@@ -909,6 +1069,8 @@ function HideSeek:EnsureWindow()
 end
 
 function HideSeek:RefreshWindow()
+	self:RefreshTrackerWindow()
+
 	local window = gameWindow
 	if not window or not window:IsShown() then
 		return
@@ -950,7 +1112,7 @@ function HideSeek:ScheduleWindowRefresh()
 	Timer.After(1, function()
 		self.windowRefreshScheduled = false
 
-		if gameWindow and gameWindow:IsShown() then
+		if (gameWindow and gameWindow:IsShown()) or (trackerWindow and trackerWindow:IsShown()) then
 			self:RefreshWindow()
 			self:ScheduleWindowRefresh()
 		end
@@ -1984,6 +2146,10 @@ function HideSeek:OnDisabled()
 
 	if gameWindow then
 		gameWindow:Hide()
+	end
+
+	if trackerWindow then
+		trackerWindow:Hide()
 	end
 end
 
