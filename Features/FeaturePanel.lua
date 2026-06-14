@@ -120,9 +120,11 @@ local function ensureRow(window, index)
 				error = err,
 			}, "error")
 			WEP:Print("Feature UI unavailable:", err)
+			FeaturePanel:RefreshWindow()
+			return
 		end
 
-		FeaturePanel:RefreshWindow()
+		FeaturePanel:HideWindow()
 	end)
 
 	window.rows[index] = row
@@ -248,4 +250,11 @@ function FeaturePanel:ShowWindow()
 	window:Show()
 	WEP:Log("FeaturePanel", "shown")
 	self:RefreshWindow()
+end
+
+function FeaturePanel:HideWindow()
+	if panelWindow and panelWindow:IsShown() then
+		panelWindow:Hide()
+		WEP:Log("FeaturePanel", "hidden")
+	end
 end

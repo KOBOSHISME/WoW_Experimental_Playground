@@ -1309,6 +1309,16 @@ function HideSeek:EnsureTrackerWindow()
 	})
 	window.revealButton:SetPoint("LEFT", window.footer, "LEFT", 0, 0)
 
+	window.openButton = Form.CreateButton(window.footer, {
+		text = "Open",
+		width = 72,
+		height = 22,
+		onClick = function()
+			self:ShowMenu()
+		end,
+	})
+	window.openButton:SetPoint("LEFT", window.revealButton, "RIGHT", 8, 0)
+
 	window.leaveButton = Form.CreateButton(window.footer, {
 		text = "Leave",
 		width = 72,
@@ -1509,6 +1519,7 @@ function HideSeek:RefreshTrackerWindow()
 	end
 
 	setButtonEnabled(window.leaveButton, self.gameId ~= nil)
+	setButtonEnabled(window.openButton, true)
 
 	if not window:IsShown() then
 		window:Show()
