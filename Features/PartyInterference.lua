@@ -6,6 +6,7 @@ local PartyInterference = {
 	customMessage = "",
 	includeSender = true,
 	selectedTarget = nil,
+	selectedActionIndex = 1,
 	counter = 0,
 }
 
@@ -19,6 +20,7 @@ PartyInterference.description = "Send temporary screen, UI, and sound interferen
 local Player = WEP.Tools.Player
 local Party = WEP.Tools.Party
 local Interference = WEP.Tools.Interference
+local Timer = WEP.Tools.Timer
 local UIVisibility = WEP.Tools.UIVisibility
 local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
@@ -36,6 +38,9 @@ local MAX_PERCENT = 95
 local DEFAULT_PERCENT = 70
 local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
+local NOTICE_SECONDS = 3
+local EFFECT_LIST_MIN_ROWS = 3
+local EFFECT_LIST_BASE_HEIGHT = 242
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -48,31 +53,37 @@ local ACTIONS = {
 	{
 		text = "Darken Screen",
 		action = "darken",
+		detail = "Screen overlay",
 	},
 	{
 		text = "Hide Health",
 		action = "hide_ui",
 		group = "unitframes",
+		detail = "Unit frames",
 	},
 	{
 		text = "Hide Bars",
 		action = "hide_ui",
 		group = "actionbars",
+		detail = "Action bars",
 	},
 	{
 		text = "Hide Minimap",
 		action = "hide_ui",
 		group = "minimap",
+		detail = "Minimap",
 	},
 	{
 		text = "Hide Chat",
 		action = "hide_ui",
 		group = "chat",
+		detail = "Chat frame",
 	},
 	{
 		text = "Play Alert",
 		action = "sound",
 		sound = DEFAULT_SOUND,
+		detail = "Repeating sound",
 	},
 }
 
@@ -84,6 +95,7 @@ local actionLabels = {
 }
 
 local interferenceWindow
+local screenNoticeFrame
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
@@ -203,6 +215,48 @@ local function shouldShowSender(payload)
 	return tostring(payload and payload.n or "1") ~= "0"
 end
 
+local function setSolidColor(texture, red, green, blue, alpha)
+	if texture.SetColorTexture then
+		texture:SetColorTexture(red, green, blue, alpha)
+	else
+		texture:SetTexture(red, green, blue, alpha)
+	end
+end
+
+local function ensureScreenNoticeFrame()
+	if screenNoticeFrame then
+		return screenNoticeFrame
+	end
+
+	if not CreateFrame or not UIParent then
+		WEP:Log("PartyInterference", "screen_notice_unavailable", nil, "warn")
+		return nil
+	end
+
+	local frame = CreateFrame("Frame", "WEPPartyInterferenceScreenNotice", UIParent)
+	frame:SetAllPoints(UIParent)
+	frame:SetFrameStrata("FULLSCREEN_DIALOG")
+	frame:SetFrameLevel(95)
+	frame:EnableMouse(false)
+	frame:Hide()
+
+	frame.background = frame:CreateTexture(nil, "BACKGROUND")
+	frame.background:SetPoint("CENTER", frame, "CENTER", 0, 150)
+	frame.background:SetSize(660, 88)
+	setSolidColor(frame.background, 0, 0, 0, 0.62)
+
+	frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+	frame.text:SetPoint("CENTER", frame.background, "CENTER", 0, 0)
+	frame.text:SetWidth(620)
+	frame.text:SetJustifyH("CENTER")
+	frame.text:SetJustifyV("MIDDLE")
+	frame.text:SetTextColor(1, 0.86, 0.1, 1)
+
+	screenNoticeFrame = frame
+	WEP:Log("PartyInterference", "screen_notice_created")
+	return screenNoticeFrame
+end
+
 function PartyInterference:IsEnabled()
 	return WEP:IsFeatureEnabled(FEATURE_ID)
 end
@@ -313,6 +367,59 @@ function PartyInterference:GetPartyItems()
 	return items
 end
 
+function PartyInterference:GetSelectedAction()
+	local selectedIndex = tonumber(self.selectedActionIndex) or 1
+
+	if not ACTIONS[selectedIndex] then
+		selectedIndex = 1
+	end
+
+	self.selectedActionIndex = selectedIndex
+	return ACTIONS[selectedIndex], selectedIndex
+end
+
+function PartyInterference:SelectAction(index)
+	index = tonumber(index) or 1
+
+	if not ACTIONS[index] then
+		return false
+	end
+
+	self.selectedActionIndex = index
+	WEP:Log("PartyInterference", "action_selected", {
+		index = index,
+		action = ACTIONS[index].action,
+		group = ACTIONS[index].group or "none",
+	})
+	self:RefreshWindow()
+	return true
+end
+
+function PartyInterference:GetActionItems()
+	local items = {}
+	local _, selectedIndex = self:GetSelectedAction()
+
+	for index, actionConfig in ipairs(ACTIONS) do
+		local selected = index == selectedIndex
+
+		items[#items + 1] = {
+			effect = actionConfig.text,
+			detail = actionConfig.detail or "",
+			color = selected and {
+				r = 0.15,
+				g = 0.45,
+				b = 0.25,
+				a = 0.45,
+			} or nil,
+			onClick = function()
+				self:SelectAction(index)
+			end,
+		}
+	end
+
+	return items
+end
+
 function PartyInterference:ReadWindowSettings()
 	local window = interferenceWindow
 
@@ -404,6 +511,17 @@ function PartyInterference:SendAction(actionConfig)
 	return true
 end
 
+function PartyInterference:SendSelectedAction()
+	local actionConfig = self:GetSelectedAction()
+
+	if not actionConfig then
+		WEP:Print("Select an effect first.")
+		return false
+	end
+
+	return self:SendAction(actionConfig)
+end
+
 function PartyInterference:SendClear()
 	return self:SendAction({
 		text = "Clear Effects",
@@ -461,7 +579,7 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 	return false, "unknown action"
 end
 
-function PartyInterference:PrintIncomingNotice(message, payload, result)
+function PartyInterference:BuildIncomingNotice(message, payload, result)
 	local customMessage = sanitizeMessage(payload and payload.m)
 	local includeSender = shouldShowSender(payload)
 	local senderName = shortName(message and message.sender or "unknown")
@@ -470,29 +588,78 @@ function PartyInterference:PrintIncomingNotice(message, payload, result)
 
 	if customMessage ~= "" then
 		if includeSender then
-			WEP:Print(senderName .. ":", customMessage)
-		else
-			WEP:Print(customMessage)
+			return senderName .. ": " .. customMessage
 		end
 
-		return
+		return customMessage
 	end
 
 	if action == "clear" then
 		if includeSender then
-			WEP:Print("Interference cleared by", senderName .. ".", "Effects:", result or 0)
-		else
-			WEP:Print("Interference cleared.", "Effects:", result or 0)
+			return "Interference cleared by " .. senderName .. ". Effects: " .. tostring(result or 0)
 		end
 
-		return
+		return "Interference cleared. Effects: " .. tostring(result or 0)
 	end
 
 	if includeSender then
-		WEP:Print("Interference from", senderName .. ":", actionText)
-	else
-		WEP:Print("Interference:", actionText)
+		return "Interference from " .. senderName .. ": " .. actionText
 	end
+
+	return "Interference: " .. actionText
+end
+
+function PartyInterference:ShowScreenNotice(text)
+	if isBlank(text) then
+		return false
+	end
+
+	local frame = ensureScreenNoticeFrame()
+	if not frame then
+		return false
+	end
+
+	self.noticeToken = (self.noticeToken or 0) + 1
+	local token = self.noticeToken
+
+	frame.text:SetText(text)
+	frame:Show()
+
+	Timer.After(NOTICE_SECONDS, function()
+		if self.noticeToken == token and frame then
+			frame:Hide()
+		end
+	end)
+
+	WEP:Log("PartyInterference", "screen_notice_shown")
+	return true
+end
+
+function PartyInterference:PrintIncomingNotice(message, payload, result)
+	local notice = self:BuildIncomingNotice(message, payload, result)
+
+	if isBlank(notice) then
+		return
+	end
+
+	WEP:Print(notice)
+	self:ShowScreenNotice(notice)
+end
+
+function PartyInterference:UpdateEffectRows()
+	local window = interferenceWindow
+	if not window or not window.effectList or not window.frame or (window.IsCollapsed and window:IsCollapsed()) then
+		return
+	end
+
+	local height = window.frame.GetHeight and window.frame:GetHeight() or 0
+	local visibleRows = math.floor((height - EFFECT_LIST_BASE_HEIGHT) / window.effectList.rowHeight)
+
+	if visibleRows < EFFECT_LIST_MIN_ROWS then
+		visibleRows = EFFECT_LIST_MIN_ROWS
+	end
+
+	window.effectList:SetVisibleRows(visibleRows)
 end
 
 function PartyInterference:OnActionMessage(message)
@@ -552,10 +719,16 @@ function PartyInterference:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPPartyInterferenceWindow",
 		title = "Party Interference",
-		width = 560,
-		height = 430,
+		width = 450,
+		height = 390,
+		minWidth = 380,
+		minHeight = 330,
+		resizable = true,
 		onShow = function()
 			self:RefreshWindow()
+		end,
+		onResize = function()
+			self:UpdateEffectRows()
 		end,
 	})
 
@@ -580,78 +753,82 @@ function PartyInterference:EnsureWindow()
 	window.selectedText:SetJustifyH("LEFT")
 
 	window.partyList = List.Create(content, {
-		width = 235,
-		visibleRows = 4,
+		width = 180,
+		visibleRows = 3,
 		rowHeight = 24,
 		emptyText = "No party members.",
 		columns = {
 			{
 				key = "name",
-				width = 130,
+				width = 98,
 			},
 			{
 				key = "state",
-				width = 72,
+				width = 54,
 			},
 		},
 	})
-	window.partyList.frame:SetPoint("TOPLEFT", window.selectedText, "BOTTOMLEFT", 0, -10)
+	window.partyList.frame:SetPoint("TOPLEFT", window.selectedText, "BOTTOMLEFT", 0, -8)
 
 	window.durationInput = Form.CreateInput(content, {
 		label = "Duration",
 		value = self.durationSeconds,
 		numeric = true,
-		width = 100,
+		width = 78,
 	})
-	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 22, 0)
+	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 16, 0)
 
 	window.percentInput = Form.CreateInput(content, {
 		label = "Percent",
 		value = self.percent,
 		numeric = true,
-		width = 100,
+		width = 78,
 	})
-	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 16, 0)
+	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 12, 0)
 
 	window.messageInput = Form.CreateInput(content, {
 		label = "Message",
 		value = self.customMessage,
-		width = 220,
+		width = 168,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
-	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -10)
+	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -8)
 
 	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", -4, -4)
+	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", -4, -2)
 	window.senderCheck:SetChecked(self.includeSender ~= false)
 
 	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
 	window.senderCheckLabel:SetText("Include sender name")
 
-	window.actionButtons = {}
-	local previousButton
+	window.effectList = List.Create(content, {
+		width = 398,
+		visibleRows = 6,
+		rowHeight = 24,
+		emptyText = "No effects.",
+		columns = {
+			{
+				key = "effect",
+				width = 150,
+			},
+			{
+				key = "detail",
+				width = 200,
+			},
+		},
+	})
+	window.effectList.frame:SetPoint("TOPLEFT", window.partyList.frame, "BOTTOMLEFT", 0, -10)
+	window.effectList.frame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 
-	for index, actionConfig in ipairs(ACTIONS) do
-		local button = Form.CreateButton(content, {
-			text = actionConfig.text,
-			width = 110,
-			onClick = function()
-				self:SendAction(actionConfig)
-			end,
-		})
-
-		if index == 1 then
-			button:SetPoint("TOPLEFT", window.partyList.frame, "BOTTOMLEFT", 0, -28)
-		elseif index == 4 then
-			button:SetPoint("TOPLEFT", window.actionButtons[1], "BOTTOMLEFT", 0, -8)
-		else
-			button:SetPoint("LEFT", previousButton, "RIGHT", 8, 0)
-		end
-
-		window.actionButtons[index] = button
-		previousButton = button
-	end
+	window.startButton = Form.CreateButton(window.footer, {
+		text = "Start",
+		width = 92,
+		onClick = function()
+			self:SendSelectedAction()
+		end,
+	})
+	window.startButton:SetPoint("LEFT", window.footer, "LEFT", 0, 0)
 
 	window.clearButton = Form.CreateButton(window.footer, {
 		text = "Clear Mine",
@@ -660,7 +837,7 @@ function PartyInterference:EnsureWindow()
 			self:SendClear()
 		end,
 	})
-	window.clearButton:SetPoint("LEFT", window.footer, "LEFT", 0, 0)
+	window.clearButton:SetPoint("LEFT", window.startButton, "RIGHT", 8, 0)
 
 	window.refreshButton = Form.CreateButton(window.footer, {
 		text = "Refresh",
@@ -672,6 +849,7 @@ function PartyInterference:EnsureWindow()
 	window.refreshButton:SetPoint("LEFT", window.clearButton, "RIGHT", 8, 0)
 
 	interferenceWindow = window
+	self:UpdateEffectRows()
 	WEP:Log("PartyInterference", "window_created")
 	return interferenceWindow
 end
@@ -692,6 +870,8 @@ function PartyInterference:RefreshWindow(statusText)
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
 	window.selectedText:SetText("Selected: " .. (selectedTarget and shortName(selectedTarget) or "none"))
 	window.partyList:SetItems(self:GetPartyItems())
+	self:UpdateEffectRows()
+	window.effectList:SetItems(self:GetActionItems())
 
 	setInputValueIfNotFocused(window.durationInput, self.durationSeconds)
 	setInputValueIfNotFocused(window.percentInput, self.percent)
@@ -701,10 +881,7 @@ function PartyInterference:RefreshWindow(statusText)
 		window.senderCheck:SetChecked(self.includeSender ~= false)
 	end
 
-	for _, button in ipairs(window.actionButtons or {}) do
-		setButtonEnabled(button, hasTarget)
-	end
-
+	setButtonEnabled(window.startButton, hasTarget)
 	setButtonEnabled(window.clearButton, hasTarget)
 	setButtonEnabled(window.refreshButton, true)
 end
