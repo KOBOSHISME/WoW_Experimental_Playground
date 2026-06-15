@@ -10,7 +10,7 @@ local PartyInterference = {
 	expandedActionGroups = {
 		visual = true,
 		ui = false,
-		sound_traps = true,
+		sound_traps = false,
 	},
 	counter = 0,
 }
@@ -75,7 +75,7 @@ local ACTION_GROUPS = {
 	{
 		key = "sound_traps",
 		text = "Sound Traps",
-		expanded = true,
+		expanded = false,
 	},
 }
 
@@ -528,23 +528,37 @@ function PartyInterference:IsActionGroupExpanded(groupKey)
 	return false
 end
 
-function PartyInterference:SetActionGroupExpanded(groupKey, expanded)
-	if not groupKey then
-		return
+function PartyInterference:SetOnlyActionGroupExpanded(groupKey, expanded)
+	self.expandedActionGroups = self.expandedActionGroups or {}
+
+	for _, group in ipairs(ACTION_GROUPS) do
+		self.expandedActionGroups[group.key] = false
 	end
 
-	self.expandedActionGroups = self.expandedActionGroups or {}
-	self.expandedActionGroups[groupKey] = expanded == true
+	if groupKey and expanded == true then
+		self.expandedActionGroups[groupKey] = true
+	end
+end
+
+function PartyInterference:GetFirstActionIndexInGroup(groupKey)
+	for index, actionConfig in ipairs(ACTIONS) do
+		if actionConfig.category == groupKey then
+			return index
+		end
+	end
+
+	return nil
 end
 
 function PartyInterference:ToggleActionGroup(groupKey)
 	local expanded = not self:IsActionGroupExpanded(groupKey)
-	self:SetActionGroupExpanded(groupKey, expanded)
+	self:SetOnlyActionGroupExpanded(groupKey, expanded)
 
-	local actionConfig = self:GetSelectedAction()
-	if not expanded and actionConfig and actionConfig.category == groupKey then
-		self.selectedActionIndex = 1
-		self:ExpandSelectedActionGroup()
+	if expanded then
+		local firstActionIndex = self:GetFirstActionIndexInGroup(groupKey)
+		if firstActionIndex then
+			self.selectedActionIndex = firstActionIndex
+		end
 	end
 
 	WEP:Log("PartyInterference", "action_group_toggled", {
@@ -557,8 +571,13 @@ end
 function PartyInterference:ExpandSelectedActionGroup()
 	local actionConfig = self:GetSelectedAction()
 	if actionConfig and actionConfig.category then
-		self:SetActionGroupExpanded(actionConfig.category, true)
+		self:SetOnlyActionGroupExpanded(actionConfig.category, true)
 	end
+end
+
+function PartyInterference:IsSelectedActionVisible()
+	local actionConfig = self:GetSelectedAction()
+	return actionConfig and self:IsActionGroupExpanded(actionConfig.category)
 end
 
 function PartyInterference:GetVisibleActionItems()
@@ -1209,6 +1228,7 @@ function PartyInterference:RefreshWindow(statusText)
 	local activeCount = Interference.GetStatus().activeCount
 	local actionConfig = self:GetSelectedAction()
 	local usesPercent = actionConfig and actionConfig.usesPercent == true
+	local canStart = hasTarget and self:IsSelectedActionVisible()
 
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
 	window.selectedText:SetText("Selected: " .. (selectedTarget and shortName(selectedTarget) or "none"))
@@ -1237,7 +1257,7 @@ function PartyInterference:RefreshWindow(statusText)
 		window.senderCheck:SetChecked(self.includeSender ~= false)
 	end
 
-	setButtonEnabled(window.startButton, hasTarget)
+	setButtonEnabled(window.startButton, canStart)
 	setButtonEnabled(window.clearButton, hasTarget)
 	setButtonEnabled(window.refreshButton, true)
 end
