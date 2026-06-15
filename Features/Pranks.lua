@@ -1,26 +1,23 @@
 local _, WEP = ...
 
-local PartyInterference = {
+local Pranks = {
 	durationSeconds = 8,
 	percent = 70,
 	customMessage = "",
 	includeSender = true,
 	selectedTarget = nil,
 	selectedActionIndex = 1,
-	expandedActionGroups = {
-		visual = true,
-		ui = false,
-		sound_traps = false,
-	},
 	counter = 0,
 }
+local PartyInterference = Pranks
 
-WEP.PartyInterference = PartyInterference
+WEP.Pranks = Pranks
+WEP.PartyInterference = Pranks
 
-local FEATURE_ID = "partyInterference"
+local FEATURE_ID = "pranks"
 
-PartyInterference.title = "Party Interference"
-PartyInterference.description = "Send temporary screen, UI, and sound interference to party friends."
+Pranks.title = "Pranks"
+Pranks.description = "Send temporary screen, UI, and sound pranks to party friends."
 
 local Player = WEP.Tools.Player
 local Party = WEP.Tools.Party
@@ -32,7 +29,7 @@ local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
 local List = WEP.Tools.List
 
-WEP:Log("PartyInterference", "loaded")
+WEP:Log("Pranks", "loaded")
 
 local MSG_ACTION = "party_interference_action"
 
@@ -45,39 +42,17 @@ local DEFAULT_PERCENT = 70
 local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
-local ACTION_ROW_HEIGHT = 24
-local ACTION_GROUP_ROW_HEIGHT = 24
-local ACTION_ROW_INDENT = 16
-local WINDOW_BASE_WIDTH = 430
-local WINDOW_BASE_HEIGHT = 460
-local WINDOW_MIN_WIDTH = 400
+local ACTION_ROW_HEIGHT = 46
+local WINDOW_BASE_WIDTH = 560
+local WINDOW_BASE_HEIGHT = 430
+local WINDOW_MIN_WIDTH = 560
 local WINDOW_MIN_HEIGHT = 430
-local MIN_WINDOW_SCALE = 0.72
-local WINDOW_SCREEN_MARGIN = 48
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
 	chat = true,
 	minimap = true,
 	unitframes = true,
-}
-
-local ACTION_GROUPS = {
-	{
-		key = "visual",
-		text = "Visual",
-		expanded = true,
-	},
-	{
-		key = "ui",
-		text = "Hide UI",
-		expanded = false,
-	},
-	{
-		key = "sound_traps",
-		text = "Sound Traps",
-		expanded = false,
-	},
 }
 
 local ACTIONS = {
@@ -180,6 +155,30 @@ local trapLabels = {
 	enemy_target = "Enemy Sting",
 	target = "Target Sting",
 	walk = "Boom Walk",
+}
+
+local categoryLabels = {
+	sound_traps = "Sound Trap",
+	ui = "Hide UI",
+	visual = "Visual",
+}
+
+local actionDescriptions = {
+	darken = "Temporarily darken their screen.",
+	hide_ui = {
+		actionbars = "Hide their action bars for the selected duration.",
+		chat = "Hide their chat frame for the selected duration.",
+		minimap = "Hide their minimap for the selected duration.",
+		unitframes = "Hide their unit frames and health for the selected duration.",
+	},
+	sound = "Play the WEP alert sound once.",
+	sound_trap = {
+		cast = "Play Error when they start casting.",
+		combat = "Play FBI Open Up when they enter combat.",
+		enemy_target = "Play Nani when they target a hostile unit.",
+		target = "Play Hello There when they target a party member.",
+		walk = "Play Vine Boom while they move.",
+	},
 }
 
 local interferenceWindow
@@ -319,17 +318,38 @@ local function setSolidColor(texture, red, green, blue, alpha)
 	end
 end
 
+local function getActionTypeLabel(actionConfig)
+	if not actionConfig then
+		return ""
+	end
+
+	return categoryLabels[actionConfig.category] or actionLabels[actionConfig.action] or ""
+end
+
+local function getActionDescription(actionConfig)
+	if not actionConfig then
+		return ""
+	end
+
+	local actionDescription = actionDescriptions[actionConfig.action]
+	if type(actionDescription) == "table" then
+		return actionDescription[actionConfig.group] or actionDescription[actionConfig.trigger] or ""
+	end
+
+	return actionDescription or ""
+end
+
 local function ensureScreenNoticeFrame()
 	if screenNoticeFrame then
 		return screenNoticeFrame
 	end
 
 	if not CreateFrame or not UIParent then
-		WEP:Log("PartyInterference", "screen_notice_unavailable", nil, "warn")
+		WEP:Log("Pranks", "screen_notice_unavailable", nil, "warn")
 		return nil
 	end
 
-	local frame = CreateFrame("Frame", "WEPPartyInterferenceScreenNotice", UIParent)
+	local frame = CreateFrame("Frame", "WEPPranksScreenNotice", UIParent)
 	frame:SetAllPoints(UIParent)
 	frame:SetFrameStrata("FULLSCREEN_DIALOG")
 	frame:SetFrameLevel(95)
@@ -344,7 +364,7 @@ local function ensureScreenNoticeFrame()
 	frame.text:SetTextColor(1, 0.86, 0.1, 1)
 
 	screenNoticeFrame = frame
-	WEP:Log("PartyInterference", "screen_notice_created")
+	WEP:Log("Pranks", "screen_notice_created")
 	return screenNoticeFrame
 end
 
@@ -358,7 +378,7 @@ function PartyInterference:Initialize()
 	end
 
 	self.initialized = true
-	WEP:Log("PartyInterference", "initialize")
+	WEP:Log("Pranks", "initialize")
 
 	WEP.Comm:RegisterHandler(MSG_ACTION, function(message)
 		if self:IsEnabled() then
@@ -416,7 +436,7 @@ function PartyInterference:SelectTarget(target)
 	for _, member in ipairs(self:GetPartyMembers()) do
 		if namesMatch(member.name, target) or namesMatch(member.shortName, target) then
 			self.selectedTarget = member.name
-			WEP:Log("PartyInterference", "target_selected", {
+			WEP:Log("Pranks", "target_selected", {
 				target = self.selectedTarget,
 			})
 			self:RefreshWindow()
@@ -424,8 +444,8 @@ function PartyInterference:SelectTarget(target)
 		end
 	end
 
-	WEP:Print("Party Interference target must be a current party member.")
-	WEP:Log("PartyInterference", "target_select_failed", {
+	WEP:Print("Prank target must be a current party member.")
+	WEP:Log("Pranks", "target_select_failed", {
 		target = target,
 		error = "not in party",
 	}, "warn")
@@ -469,109 +489,21 @@ function PartyInterference:GetSelectedAction()
 	return ACTIONS[selectedIndex], selectedIndex
 end
 
-function PartyInterference:IsActionGroupExpanded(groupKey)
-	if not groupKey then
-		return false
-	end
-
-	if self.expandedActionGroups and self.expandedActionGroups[groupKey] ~= nil then
-		return self.expandedActionGroups[groupKey] == true
-	end
-
-	for _, group in ipairs(ACTION_GROUPS) do
-		if group.key == groupKey then
-			return group.expanded == true
-		end
-	end
-
-	return false
-end
-
-function PartyInterference:SetOnlyActionGroupExpanded(groupKey, expanded)
-	self.expandedActionGroups = self.expandedActionGroups or {}
-
-	for _, group in ipairs(ACTION_GROUPS) do
-		self.expandedActionGroups[group.key] = false
-	end
-
-	if groupKey and expanded == true then
-		self.expandedActionGroups[groupKey] = true
-	end
-end
-
-function PartyInterference:GetFirstActionIndexInGroup(groupKey)
-	for index, actionConfig in ipairs(ACTIONS) do
-		if actionConfig.category == groupKey then
-			return index
-		end
-	end
-
-	return nil
-end
-
-function PartyInterference:ToggleActionGroup(groupKey)
-	local expanded = not self:IsActionGroupExpanded(groupKey)
-	self:SetOnlyActionGroupExpanded(groupKey, expanded)
-
-	if expanded then
-		local firstActionIndex = self:GetFirstActionIndexInGroup(groupKey)
-		if firstActionIndex then
-			self.selectedActionIndex = firstActionIndex
-		end
-	end
-
-	WEP:Log("PartyInterference", "action_group_toggled", {
-		group = groupKey or "none",
-		expanded = self:IsActionGroupExpanded(groupKey),
-	})
-	self:RefreshWindow()
-end
-
-function PartyInterference:ExpandSelectedActionGroup()
-	local actionConfig = self:GetSelectedAction()
-	if actionConfig and actionConfig.category then
-		self:SetOnlyActionGroupExpanded(actionConfig.category, true)
-	end
-end
-
 function PartyInterference:IsSelectedActionVisible()
-	local actionConfig = self:GetSelectedAction()
-	return actionConfig and self:IsActionGroupExpanded(actionConfig.category)
+	return self:GetSelectedAction() ~= nil
 end
 
 function PartyInterference:GetVisibleActionItems()
 	local items = {}
 
-	for _, group in ipairs(ACTION_GROUPS) do
-		local expanded = self:IsActionGroupExpanded(group.key)
-
+	for index, actionConfig in ipairs(ACTIONS) do
 		items[#items + 1] = {
-			kind = "group",
-			group = group,
-			expanded = expanded,
+			index = index,
+			action = actionConfig,
 		}
-
-		if expanded then
-			for index, actionConfig in ipairs(ACTIONS) do
-				if actionConfig.category == group.key then
-					items[#items + 1] = {
-						kind = "action",
-						index = index,
-						action = actionConfig,
-					}
-				end
-			end
-		end
 	end
 
 	return items
-end
-
-function PartyInterference:GetDesiredWindowHeight()
-	local visibleRows = #self:GetVisibleActionItems()
-	local extraRows = math.max(0, visibleRows - 8)
-
-	return WINDOW_BASE_HEIGHT + (extraRows * ACTION_ROW_HEIGHT)
 end
 
 function PartyInterference:ApplyWindowFit()
@@ -584,47 +516,8 @@ function PartyInterference:ApplyWindowFit()
 		return
 	end
 
-	local desiredHeight = self:GetDesiredWindowHeight()
 	if window.SetSize then
-		window:SetSize(WINDOW_BASE_WIDTH, desiredHeight)
-	end
-
-	local frame = window.frame
-	if not frame.SetScale then
-		return
-	end
-
-	local scale = 1
-	local frameWidth = frame.GetWidth and frame:GetWidth() or WINDOW_BASE_WIDTH
-	local frameHeight = frame.GetHeight and frame:GetHeight() or desiredHeight
-	local parentWidth = UIParent and UIParent.GetWidth and UIParent:GetWidth() or nil
-	local parentHeight = UIParent and UIParent.GetHeight and UIParent:GetHeight() or nil
-
-	if parentWidth and parentWidth > WINDOW_SCREEN_MARGIN and frameWidth > 0 then
-		scale = math.min(scale, (parentWidth - WINDOW_SCREEN_MARGIN) / frameWidth)
-	end
-
-	if parentHeight and parentHeight > WINDOW_SCREEN_MARGIN and frameHeight > 0 then
-		scale = math.min(scale, (parentHeight - WINDOW_SCREEN_MARGIN) / frameHeight)
-	end
-
-	if scale < MIN_WINDOW_SCALE then
-		scale = MIN_WINDOW_SCALE
-	end
-
-	if scale > 1 then
-		scale = 1
-	end
-
-	if self.windowScale ~= scale then
-		self.windowScale = scale
-		frame:SetScale(scale)
-		WEP:Log("PartyInterference", "window_scale_set", {
-			scale = scale,
-			height = desiredHeight,
-		})
-	else
-		frame:SetScale(scale)
+		window:SetSize(WINDOW_BASE_WIDTH, WINDOW_BASE_HEIGHT)
 	end
 end
 
@@ -641,8 +534,7 @@ function PartyInterference:SelectAction(index)
 	end
 
 	self.selectedActionIndex = index
-	self:ExpandSelectedActionGroup()
-	WEP:Log("PartyInterference", "action_selected", {
+	WEP:Log("Pranks", "action_selected", {
 		index = index,
 		action = ACTIONS[index].action,
 		group = ACTIONS[index].group or "none",
@@ -686,7 +578,7 @@ end
 
 function PartyInterference:SendAction(actionConfig)
 	if not self:IsEnabled() then
-		WEP:Print("Party Interference is disabled. Open /wep to enable it.")
+		WEP:Print("Pranks is disabled. Open /wep to enable it.")
 		return false
 	end
 
@@ -729,17 +621,17 @@ function PartyInterference:SendAction(actionConfig)
 
 	local ok, messageIdOrErr = WEP.Comm:Send(MSG_ACTION, payload, WEP.Comm:GetDefaultBroadcastOptions())
 	if not ok then
-		WEP:Log("PartyInterference", "send_failed", {
+		WEP:Log("Pranks", "send_failed", {
 			target = target,
 			action = actionConfig.action,
 			error = messageIdOrErr,
 		}, "error")
-		WEP:Print("Party Interference failed:", messageIdOrErr)
+		WEP:Print("Prank failed:", messageIdOrErr)
 		self:RefreshWindow()
 		return false
 	end
 
-	WEP:Log("PartyInterference", "send_queued", {
+	WEP:Log("Pranks", "send_queued", {
 		target = target,
 		action = actionConfig.action,
 		group = actionConfig.group or "none",
@@ -747,7 +639,7 @@ function PartyInterference:SendAction(actionConfig)
 		sound = payload.s or "none",
 		messageId = messageIdOrErr,
 	})
-	WEP:Print("Interference sent to", shortName(target) .. ":", actionConfig.text or actionConfig.action)
+	WEP:Print("Prank sent to", shortName(target) .. ":", actionConfig.text or actionConfig.action)
 	self:RefreshWindow("Queued " .. (actionConfig.text or actionConfig.action) .. " for " .. shortName(target) .. ".")
 	return true
 end
@@ -775,7 +667,7 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 
 	if action == "clear" then
 		local count = Interference.ClearBySource(message.sender)
-		WEP:Log("PartyInterference", "incoming_clear_applied", {
+		WEP:Log("Pranks", "incoming_clear_applied", {
 			sender = message.sender,
 			count = count,
 		})
@@ -839,7 +731,7 @@ function PartyInterference:BuildIncomingNotice(message, payload, result)
 	local includeSender = shouldShowSender(payload)
 	local senderName = shortName(message and message.sender or "unknown")
 	local action = payload and payload.a or ""
-	local actionText = actionLabels[action] or action or "Interference"
+	local actionText = actionLabels[action] or action or "Prank"
 	local trigger = normalizeTrapTrigger(payload and payload.k)
 
 	if action == "sound_trap" or action == "trap" then
@@ -856,17 +748,17 @@ function PartyInterference:BuildIncomingNotice(message, payload, result)
 
 	if action == "clear" then
 		if includeSender then
-			return "Interference cleared by " .. senderName .. ". Effects: " .. tostring(result or 0)
+			return "Pranks cleared by " .. senderName .. ". Effects: " .. tostring(result or 0)
 		end
 
-		return "Interference cleared. Effects: " .. tostring(result or 0)
+		return "Pranks cleared. Effects: " .. tostring(result or 0)
 	end
 
 	if includeSender then
-		return "Interference from " .. senderName .. ": " .. actionText
+		return "Prank from " .. senderName .. ": " .. actionText
 	end
 
-	return "Interference: " .. actionText
+	return "Prank: " .. actionText
 end
 
 function PartyInterference:ShowScreenNotice(text)
@@ -891,7 +783,7 @@ function PartyInterference:ShowScreenNotice(text)
 		end
 	end)
 
-	WEP:Log("PartyInterference", "screen_notice_shown")
+	WEP:Log("Pranks", "screen_notice_shown")
 	return true
 end
 
@@ -921,14 +813,47 @@ local function ensureActionRow(window, index)
 	row.background = row:CreateTexture(nil, "BACKGROUND")
 	row.background:SetAllPoints(row)
 
-	row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	row.name:SetJustifyH("LEFT")
-	row.name:SetJustifyV("MIDDLE")
+	row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+	row.check:SetPoint("LEFT", row, "LEFT", -4, 0)
 
-	row.toggle = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	row.toggle:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-	row.toggle:SetWidth(24)
-	row.toggle:SetJustifyH("RIGHT")
+	row.title = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	row.title:SetPoint("TOPLEFT", row.check, "TOPRIGHT", 2, -4)
+	row.title:SetWidth(250)
+	row.title:SetJustifyH("LEFT")
+
+	row.description = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -2)
+	row.description:SetWidth(305)
+	row.description:SetJustifyH("LEFT")
+
+	row.type = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	row.type:SetPoint("RIGHT", row, "RIGHT", -74, 0)
+	row.type:SetWidth(110)
+	row.type:SetJustifyH("RIGHT")
+
+	row.sendButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	row.sendButton:SetSize(58, 22)
+	row.sendButton:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+	row.sendButton:SetText("Send")
+
+	row.check:SetScript("OnClick", function()
+		if row.actionIndex then
+			PartyInterference:SelectAction(row.actionIndex)
+		end
+	end)
+
+	row:SetScript("OnClick", function()
+		if row.actionIndex then
+			PartyInterference:SelectAction(row.actionIndex)
+		end
+	end)
+
+	row.sendButton:SetScript("OnClick", function()
+		if row.actionIndex and ACTIONS[row.actionIndex] then
+			PartyInterference:SelectAction(row.actionIndex)
+			PartyInterference:SendAction(ACTIONS[row.actionIndex])
+		end
+	end)
 
 	window.actionRows[index] = row
 	return row
@@ -942,50 +867,36 @@ function PartyInterference:RefreshActionRows()
 
 	local _, selectedIndex = self:GetSelectedAction()
 	local items = self:GetVisibleActionItems()
+	local hasTarget = self:GetSelectedTarget() ~= nil
 
 	window.actionFrame:SetHeight(#items * ACTION_ROW_HEIGHT)
 
+	if window.scrollFrame and window.scrollFrame.GetWidth and window.scrollFrame:GetWidth() > 0 then
+		window.actionFrame:SetWidth(window.scrollFrame:GetWidth())
+	end
+
 	for index, item in ipairs(items) do
 		local row = ensureActionRow(window, index)
+		local actionConfig = item.action
+		local selected = item.index == selectedIndex
 
 		row:ClearAllPoints()
 		row:SetPoint("TOPLEFT", window.actionFrame, "TOPLEFT", 0, -((index - 1) * ACTION_ROW_HEIGHT))
 		row:SetPoint("RIGHT", window.actionFrame, "RIGHT", 0, 0)
 		row:Show()
+		row.actionIndex = item.index
 
-		row.name:ClearAllPoints()
-		row.name:SetPoint("RIGHT", row.toggle, "LEFT", -8, 0)
-
-		if item.kind == "group" then
-			local group = item.group
-
-			row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
-			row.name:SetText(group.text)
-			row.name:SetTextColor(1, 0.82, 0.05, 1)
-			row.toggle:SetText(item.expanded and "-" or "+")
-			setSolidColor(row.background, 0.16, 0.11, 0.02, 0.4)
-			row:SetScript("OnClick", function()
-				self:ToggleActionGroup(group.key)
-			end)
+		if selected then
+			setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
 		else
-			local actionConfig = item.action
-			local selected = item.index == selectedIndex
-
-			row.name:SetPoint("LEFT", row, "LEFT", ACTION_ROW_INDENT + 8, 0)
-			row.name:SetText(actionConfig.text)
-			row.name:SetTextColor(1, 1, 1, 1)
-			row.toggle:SetText("")
-
-			if selected then
-				setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
-			else
-				setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.12 or 0.04)
-			end
-
-			row:SetScript("OnClick", function()
-				self:SelectAction(item.index)
-			end)
+			setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.14 or 0.06)
 		end
+
+		row.check:SetChecked(selected)
+		row.title:SetText(actionConfig.text)
+		row.description:SetText(getActionDescription(actionConfig))
+		row.type:SetText(getActionTypeLabel(actionConfig))
+		setButtonEnabled(row.sendButton, hasTarget)
 	end
 
 	for index = #items + 1, #window.actionRows do
@@ -1001,7 +912,7 @@ function PartyInterference:OnActionMessage(message)
 	end
 
 	if not Player.IsSelf(payload.t) then
-		WEP:Log("PartyInterference", "incoming_ignored", {
+		WEP:Log("Pranks", "incoming_ignored", {
 			sender = message.sender,
 			target = payload.t or "none",
 			reason = "target mismatch",
@@ -1010,7 +921,7 @@ function PartyInterference:OnActionMessage(message)
 	end
 
 	if not Party.IsPartyMember(message.sender) then
-		WEP:Log("PartyInterference", "incoming_ignored", {
+		WEP:Log("Pranks", "incoming_ignored", {
 			sender = message.sender or "none",
 			reason = "sender not in party",
 		}, "warn")
@@ -1019,7 +930,7 @@ function PartyInterference:OnActionMessage(message)
 
 	local ok, idOrErr = self:ApplyIncomingAction(message, payload)
 	if not ok then
-		WEP:Log("PartyInterference", "incoming_apply_failed", {
+		WEP:Log("Pranks", "incoming_apply_failed", {
 			sender = message.sender,
 			action = payload.a or "none",
 			error = idOrErr,
@@ -1027,7 +938,7 @@ function PartyInterference:OnActionMessage(message)
 		return
 	end
 
-	WEP:Log("PartyInterference", "incoming_applied", {
+	WEP:Log("Pranks", "incoming_applied", {
 		sender = message.sender,
 		action = payload.a or "none",
 		effectId = idOrErr or "none",
@@ -1042,29 +953,28 @@ function PartyInterference:EnsureWindow()
 	end
 
 	if not WindowTool then
-		WEP:Log("PartyInterference", "window_unavailable", nil, "error")
-		WEP:Print("Party Interference UI tools are unavailable.")
+		WEP:Log("Pranks", "window_unavailable", nil, "error")
+		WEP:Print("Pranks UI tools are unavailable.")
 		return nil
 	end
 
 	local window, err = WindowTool.Create({
-		name = "WEPPartyInterferenceWindow",
-		title = "Party Interference",
+		name = "WEPPranksWindow",
+		title = "Pranks",
 		width = WINDOW_BASE_WIDTH,
 		height = WINDOW_BASE_HEIGHT,
 		minWidth = WINDOW_MIN_WIDTH,
 		minHeight = WINDOW_MIN_HEIGHT,
-		resizable = true,
 		onShow = function()
 			self:RefreshWindow()
 		end,
 	})
 
 	if not window then
-		WEP:Log("PartyInterference", "window_failed", {
+		WEP:Log("Pranks", "window_failed", {
 			error = err,
 		}, "error")
-		WEP:Print("Party Interference failed:", err)
+		WEP:Print("Pranks failed:", err)
 		return nil
 	end
 
@@ -1081,14 +991,14 @@ function PartyInterference:EnsureWindow()
 	window.selectedText:SetJustifyH("LEFT")
 
 	window.partyList = List.Create(content, {
-		width = 150,
-		visibleRows = 2,
+		width = 190,
+		visibleRows = 4,
 		rowHeight = 24,
 		emptyText = "No party members.",
 		columns = {
 			{
 				key = "name",
-				width = 86,
+				width = 120,
 			},
 			{
 				key = "state",
@@ -1104,7 +1014,7 @@ function PartyInterference:EnsureWindow()
 		numeric = true,
 		width = 72,
 	})
-	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 16, 0)
+	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 18, 0)
 
 	window.percentInput = Form.CreateInput(content, {
 		label = "Percent",
@@ -1117,7 +1027,7 @@ function PartyInterference:EnsureWindow()
 	window.messageInput = Form.CreateInput(content, {
 		label = "Message",
 		value = self.customMessage,
-		width = 156,
+		width = 188,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
 	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -8)
@@ -1131,18 +1041,21 @@ function PartyInterference:EnsureWindow()
 	window.senderCheckLabel:SetText("Include sender name")
 
 	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -10)
-	window.actionTitle:SetText("Effect")
+	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -12)
+	window.actionTitle:SetText("Prank")
 
-	window.actionFrame = CreateFrame("Frame", nil, content)
-	window.actionFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -6)
-	window.actionFrame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
-	window.actionFrame:SetHeight(ACTION_GROUP_ROW_HEIGHT * #ACTION_GROUPS)
+	window.scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
+	window.scrollFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -6)
+	window.scrollFrame:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -24, 0)
+
+	window.actionFrame = CreateFrame("Frame", nil, window.scrollFrame)
+	window.actionFrame:SetSize(WINDOW_BASE_WIDTH - 58, ACTION_ROW_HEIGHT * #ACTIONS)
+	window.scrollFrame:SetScrollChild(window.actionFrame)
 	window.actionRows = {}
 
 	window.startButton = Form.CreateButton(window.footer, {
-		text = "Start",
-		width = 92,
+		text = "Send Selected",
+		width = 112,
 		onClick = function()
 			self:SendSelectedAction()
 		end,
@@ -1169,7 +1082,7 @@ function PartyInterference:EnsureWindow()
 
 	interferenceWindow = window
 	self:RefreshActionRows()
-	WEP:Log("PartyInterference", "window_created")
+	WEP:Log("Pranks", "window_created")
 	return interferenceWindow
 end
 
@@ -1190,7 +1103,7 @@ function PartyInterference:RefreshWindow(statusText)
 	local canStart = hasTarget and self:IsSelectedActionVisible()
 
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
-	window.selectedText:SetText("Selected: " .. (selectedTarget and shortName(selectedTarget) or "none"))
+	window.selectedText:SetText("Target: " .. (selectedTarget and shortName(selectedTarget) or "none"))
 	window.partyList:SetItems(self:GetPartyItems())
 	self:RefreshActionRows()
 	self:ApplyWindowFit()
@@ -1229,7 +1142,7 @@ function PartyInterference:ShowWindow()
 
 	window:Show()
 	self:RefreshWindow()
-	WEP:Log("PartyInterference", "window_shown")
+	WEP:Log("Pranks", "window_shown")
 end
 
 function PartyInterference:ShowMenu()
@@ -1244,11 +1157,11 @@ function PartyInterference:PrintStatus()
 	local members = self:GetPartyMembers()
 	local status = Interference.GetStatus()
 
-	WEP:Print("Party Interference:", #members, "party members,", status.activeCount, "active effects on you.")
+	WEP:Print("Pranks:", #members, "party members,", status.activeCount, "active effects on you.")
 end
 
 function PartyInterference:OnDisabled()
-	WEP:Log("PartyInterference", "disabled")
+	WEP:Log("Pranks", "disabled")
 
 	if interferenceWindow then
 		interferenceWindow:Hide()
@@ -1261,12 +1174,12 @@ end
 
 function PartyInterference:HandleSlash(args)
 	if not self:IsEnabled() then
-		WEP:Print("Party Interference is disabled. Open /wep to enable it.")
+		WEP:Print("Pranks is disabled. Open /wep to enable it.")
 		return
 	end
 
 	local action = args[2]
-	WEP:Log("PartyInterference", "slash", {
+	WEP:Log("Pranks", "slash", {
 		action = action or "menu",
 	})
 
@@ -1280,9 +1193,9 @@ function PartyInterference:HandleSlash(args)
 		return
 	end
 
-	WEP:Print("Usage: /wep interfere")
-	WEP:Print("Usage: /wep interfere status")
+	WEP:Print("Usage: /wep pranks")
+	WEP:Print("Usage: /wep pranks status")
 end
 
-WEP:RegisterFeature(FEATURE_ID, PartyInterference)
-WEP:RegisterModule("PartyInterference", PartyInterference)
+WEP:RegisterFeature(FEATURE_ID, Pranks)
+WEP:RegisterModule("Pranks", Pranks)

@@ -30,5 +30,5 @@ Features\FeaturePanel.lua
 Features\Diagnostics.lua
 Features\ToolDebug.lua
 Features\HideSeek.lua
-Features\PartyInterference.lua
+Features\Pranks.lua
 Features\SoundEvents.lua

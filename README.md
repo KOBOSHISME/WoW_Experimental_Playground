@@ -16,7 +16,7 @@ The point is to keep experiments easy to try, easy to turn off, and easy to remo
 The addon has a small core, shared tools, a hidden addon communication layer, and a few feature modules:
 
 - Hide and Seek, an addon-managed challenge mode.
-- Party Interference, a party-only prank/control panel.
+- Pranks, a party-only panel for temporary UI and sound mischief.
 - Sound Events, local sound triggers for casts and world events.
 - Tool Debug, a grab bag for testing shared tools in-game.
 
@@ -87,20 +87,20 @@ During a game, the starter randomly chooses the seeker unless one is selected. T
 
 The seeker gets a black countdown screen while hiders hide. When the countdown ends, the blackout is removed and the seeker's map, minimap, unit frames, and action bars are hidden. The starting spot is marked as a user waypoint on supported clients so hiders can see it on the map and minimap; the tracker also shows start-spot distance and play-area status for participants, including the seeker while their map UI is hidden. The map and minimap tint everything outside the play-area radius red and mark the starting spot. If a hider stays outside the play area for 5 seconds, that hider is counted found; if the seeker stays outside, the seeker loses. The seeker tags a hider by targeting them, then must return to the starting spot to mark that hider found. Hiders become safe by reaching the starting spot and staying there for 1 second while the seeker is away. If all hiders become safe, hiders win. If any hider is found, the seeker wins and that hider is preselected as the next seeker. If the seek timer expires first, hiders win. If the host enabled Star reveals, the seeker's tracker includes a Reveal button that briefly places the Star raid target icon on addressable, active hiders. After a game ends, the host can use Start Again in the same Hide and Seek window to reuse the current roster.
 
-## Party Interference
+## Pranks
 
-Party Interference is a small party-only prank feature. Open it with:
+Pranks is a small party-only feature for sending temporary effects to friends who also have the addon. Open it with:
 
 ```text
-/wep interfere
+/wep pranks
 /wep prank
 ```
 
-The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration, optionally add a short custom message, choose whether to include your sender name, expand an effect group, select an effect, then press Start. The window resizes for expanded groups and scales the whole frame down when needed so text, buttons, and rows stay inside the panel. The percent field appears only for screen darkening, where it controls blackout intensity.
+The window lists current `party1` through `party4` members. Select a party member, choose a bounded duration, optionally add a short custom message, choose whether to include your sender name, then pick from the scrollable prank list. Each row has a selector, a short description, a type label, and its own Send button. The footer can still send the selected row, clear effects that you sent, or refresh the party list. The percent field appears only for screen darkening, where it controls blackout intensity.
 
-Core interference actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent. Sound-trap actions pick themed sounds automatically: Boom Walk plays Vine Boom while the target moves, Target Sting plays Hello There when they target a party member, Combat Drop plays FBI Open Up when they enter combat, Cast Heckle plays Error when they start casting, and Enemy Sting plays Nani when they target a hostile unit.
+Core prank actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent. Sound-trap actions pick themed sounds automatically: Boom Walk plays Vine Boom while the target moves, Target Sting plays Hello There when they target a party member, Combat Drop plays FBI Open Up when they enter combat, Cast Heckle plays Error when they start casting, and Enemy Sting plays Nani when they target a hostile unit.
 
-Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-900 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
+Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-900 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary pranks do not restore UI that another feature, such as Hide and Seek, is still hiding. The old `/wep interfere` command still opens Pranks.
 
 ## Sound Events
 
@@ -248,7 +248,7 @@ WEP.Tools.Sound.Play("custom:wep-alert.wav", { duration = 1 })
 WEP.Tools.Sound.PlayCustom("wep-alert.wav")
 ```
 
-Party Interference registers a set of short `wep_*` custom sound IDs for sound traps. Use `/wep tools sound list` to print the current registered names.
+Pranks registers a set of short `wep_*` custom sound IDs for sound traps. Use `/wep tools sound list` to print the current registered names.
 
 Supported options are:
 

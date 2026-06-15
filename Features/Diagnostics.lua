@@ -88,11 +88,13 @@ function Diagnostics:HandleSlash(input)
 		return
 	end
 
-	if args[1] == "interfere" or args[1] == "interference" or args[1] == "prank" then
-		if WEP.PartyInterference and WEP.PartyInterference.HandleSlash then
+	if args[1] == "pranks" or args[1] == "prank" or args[1] == "interfere" or args[1] == "interference" then
+		if WEP.Pranks and WEP.Pranks.HandleSlash then
+			WEP.Pranks:HandleSlash(args)
+		elseif WEP.PartyInterference and WEP.PartyInterference.HandleSlash then
 			WEP.PartyInterference:HandleSlash(args)
 		else
-			WEP:Print("Party Interference feature is unavailable.")
+			WEP:Print("Pranks feature is unavailable.")
 		end
 
 		return
@@ -166,7 +168,7 @@ function Diagnostics.PrintHelp()
 	WEP:Print("/wep comm ping - Send a hidden discovery ping.")
 	WEP:Print("/wep comm debug [on|off] - Toggle communication debug messages.")
 	WEP:Print("/wep hide - Open Hide and Seek.")
-	WEP:Print("/wep interfere - Open Party Interference.")
+	WEP:Print("/wep pranks - Open Pranks.")
 	WEP:Print("/wep sounds - Open Sound Events.")
 	WEP:Print("/wep tools help - Show tool debug commands.")
 end

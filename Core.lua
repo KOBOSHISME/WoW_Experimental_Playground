@@ -19,7 +19,7 @@ local DEFAULTS = {
 	},
 	features = {
 		hideSeek = true,
-		partyInterference = true,
+		pranks = true,
 		soundEvents = true,
 		toolDebug = true,
 	},
@@ -38,6 +38,16 @@ local DEFAULT_LOG_MAX_ENTRIES = 300
 local MIN_LOG_MAX_ENTRIES = 50
 local MAX_LOG_MAX_ENTRIES = 1000
 local MAX_LOG_DETAILS_LENGTH = 240
+
+local function migrateSavedVariables(db)
+	if not db or type(db.features) ~= "table" then
+		return
+	end
+
+	if db.features.pranks == nil and db.features.partyInterference ~= nil then
+		db.features.pranks = db.features.partyInterference == true
+	end
+end
 
 local function getFeatureUIHandler(feature)
 	if type(feature) ~= "table" then
@@ -387,6 +397,7 @@ function WEP:Initialize()
 	end
 
 	WEPDB = WEPDB or {}
+	migrateSavedVariables(WEPDB)
 	self.Utils.Table.ApplyDefaults(WEPDB, DEFAULTS)
 
 	self.db = WEPDB
