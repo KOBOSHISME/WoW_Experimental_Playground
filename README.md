@@ -91,11 +91,11 @@ Party Interference is a small party-only prank feature. Open it with:
 /wep prank
 ```
 
-The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration, optionally add a short custom message, choose whether to include your sender name, select an effect from the compact action grid, then press Start. The percent field appears only for screen darkening, where it controls blackout intensity.
+The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration, optionally add a short custom message, choose whether to include your sender name, expand an effect group, select an effect, then press Start. The window resizes for expanded groups and scales the whole frame down when needed so text, buttons, and rows stay inside the panel. The percent field appears only for screen darkening, where it controls blackout intensity.
 
 Core interference actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent. Sound-trap actions pick themed sounds automatically: Boom Walk plays Vine Boom while the target moves, Target Sting plays Hello There when they target a party member, Combat Drop plays FBI Open Up when they enter combat, Cast Heckle plays Error when they start casting, and Enemy Sting plays Nani when they target a hostile unit.
 
-Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-30 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
+Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-900 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
 
 ## Tool Debug Commands
 

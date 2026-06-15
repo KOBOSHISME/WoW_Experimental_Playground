@@ -7,6 +7,11 @@ local PartyInterference = {
 	includeSender = true,
 	selectedTarget = nil,
 	selectedActionIndex = 1,
+	expandedActionGroups = {
+		visual = true,
+		ui = false,
+		sound_traps = true,
+	},
 	counter = 0,
 }
 
@@ -31,7 +36,7 @@ WEP:Log("PartyInterference", "loaded")
 local MSG_ACTION = "party_interference_action"
 
 local MIN_DURATION_SECONDS = 1
-local MAX_DURATION_SECONDS = 30
+local MAX_DURATION_SECONDS = 900
 local DEFAULT_DURATION_SECONDS = 8
 local MIN_PERCENT = 10
 local MAX_PERCENT = 95
@@ -40,9 +45,14 @@ local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
 local ACTION_ROW_HEIGHT = 24
-local ACTION_COLUMNS = 2
-local ACTION_COLUMN_WIDTH = 196
-local ACTION_COLUMN_GAP = 10
+local ACTION_GROUP_ROW_HEIGHT = 24
+local ACTION_ROW_INDENT = 16
+local WINDOW_BASE_WIDTH = 430
+local WINDOW_BASE_HEIGHT = 460
+local WINDOW_MIN_WIDTH = 400
+local WINDOW_MIN_HEIGHT = 430
+local MIN_WINDOW_SCALE = 0.72
+local WINDOW_SCREEN_MARGIN = 48
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -51,39 +61,64 @@ local ALLOWED_UI_GROUPS = {
 	unitframes = true,
 }
 
+local ACTION_GROUPS = {
+	{
+		key = "visual",
+		text = "Visual",
+		expanded = true,
+	},
+	{
+		key = "ui",
+		text = "Hide UI",
+		expanded = false,
+	},
+	{
+		key = "sound_traps",
+		text = "Sound Traps",
+		expanded = true,
+	},
+}
+
 local ACTIONS = {
 	{
+		category = "visual",
 		text = "Darken Screen",
 		action = "darken",
 		percentLabel = "Intensity",
 		usesPercent = true,
 	},
 	{
+		category = "ui",
 		text = "Hide Health",
 		action = "hide_ui",
 		group = "unitframes",
 	},
 	{
+		category = "ui",
 		text = "Hide Bars",
 		action = "hide_ui",
 		group = "actionbars",
 	},
 	{
+		category = "ui",
 		text = "Hide Minimap",
 		action = "hide_ui",
 		group = "minimap",
 	},
 	{
+		category = "ui",
 		text = "Hide Chat",
 		action = "hide_ui",
 		group = "chat",
 	},
 	{
+		category = "sound_traps",
 		text = "Play Alert",
 		action = "sound",
 		sound = DEFAULT_SOUND,
 	},
 	{
+		category = "sound_traps",
 		text = "Boom Walk",
 		action = "sound_trap",
 		wireAction = "trap",
@@ -92,6 +127,7 @@ local ACTIONS = {
 		sound = "wep_vine_boom",
 	},
 	{
+		category = "sound_traps",
 		text = "Target Sting",
 		action = "sound_trap",
 		wireAction = "trap",
@@ -100,6 +136,7 @@ local ACTIONS = {
 		sound = "wep_hello_there",
 	},
 	{
+		category = "sound_traps",
 		text = "Combat Drop",
 		action = "sound_trap",
 		wireAction = "trap",
@@ -108,6 +145,7 @@ local ACTIONS = {
 		sound = "wep_fbi_open_up",
 	},
 	{
+		category = "sound_traps",
 		text = "Cast Heckle",
 		action = "sound_trap",
 		wireAction = "trap",
@@ -116,6 +154,7 @@ local ACTIONS = {
 		sound = "wep_error",
 	},
 	{
+		category = "sound_traps",
 		text = "Enemy Sting",
 		action = "sound_trap",
 		wireAction = "trap",
@@ -471,6 +510,146 @@ function PartyInterference:GetSelectedAction()
 	return ACTIONS[selectedIndex], selectedIndex
 end
 
+function PartyInterference:IsActionGroupExpanded(groupKey)
+	if not groupKey then
+		return false
+	end
+
+	if self.expandedActionGroups and self.expandedActionGroups[groupKey] ~= nil then
+		return self.expandedActionGroups[groupKey] == true
+	end
+
+	for _, group in ipairs(ACTION_GROUPS) do
+		if group.key == groupKey then
+			return group.expanded == true
+		end
+	end
+
+	return false
+end
+
+function PartyInterference:SetActionGroupExpanded(groupKey, expanded)
+	if not groupKey then
+		return
+	end
+
+	self.expandedActionGroups = self.expandedActionGroups or {}
+	self.expandedActionGroups[groupKey] = expanded == true
+end
+
+function PartyInterference:ToggleActionGroup(groupKey)
+	local expanded = not self:IsActionGroupExpanded(groupKey)
+	self:SetActionGroupExpanded(groupKey, expanded)
+
+	local actionConfig = self:GetSelectedAction()
+	if not expanded and actionConfig and actionConfig.category == groupKey then
+		self.selectedActionIndex = 1
+		self:ExpandSelectedActionGroup()
+	end
+
+	WEP:Log("PartyInterference", "action_group_toggled", {
+		group = groupKey or "none",
+		expanded = self:IsActionGroupExpanded(groupKey),
+	})
+	self:RefreshWindow()
+end
+
+function PartyInterference:ExpandSelectedActionGroup()
+	local actionConfig = self:GetSelectedAction()
+	if actionConfig and actionConfig.category then
+		self:SetActionGroupExpanded(actionConfig.category, true)
+	end
+end
+
+function PartyInterference:GetVisibleActionItems()
+	local items = {}
+
+	for _, group in ipairs(ACTION_GROUPS) do
+		local expanded = self:IsActionGroupExpanded(group.key)
+
+		items[#items + 1] = {
+			kind = "group",
+			group = group,
+			expanded = expanded,
+		}
+
+		if expanded then
+			for index, actionConfig in ipairs(ACTIONS) do
+				if actionConfig.category == group.key then
+					items[#items + 1] = {
+						kind = "action",
+						index = index,
+						action = actionConfig,
+					}
+				end
+			end
+		end
+	end
+
+	return items
+end
+
+function PartyInterference:GetDesiredWindowHeight()
+	local visibleRows = #self:GetVisibleActionItems()
+	local extraRows = math.max(0, visibleRows - 8)
+
+	return WINDOW_BASE_HEIGHT + (extraRows * ACTION_ROW_HEIGHT)
+end
+
+function PartyInterference:ApplyWindowFit()
+	local window = interferenceWindow
+	if not window or not window.frame then
+		return
+	end
+
+	if window.IsCollapsed and window:IsCollapsed() then
+		return
+	end
+
+	local desiredHeight = self:GetDesiredWindowHeight()
+	if window.SetSize then
+		window:SetSize(WINDOW_BASE_WIDTH, desiredHeight)
+	end
+
+	local frame = window.frame
+	if not frame.SetScale then
+		return
+	end
+
+	local scale = 1
+	local frameWidth = frame.GetWidth and frame:GetWidth() or WINDOW_BASE_WIDTH
+	local frameHeight = frame.GetHeight and frame:GetHeight() or desiredHeight
+	local parentWidth = UIParent and UIParent.GetWidth and UIParent:GetWidth() or nil
+	local parentHeight = UIParent and UIParent.GetHeight and UIParent:GetHeight() or nil
+
+	if parentWidth and parentWidth > WINDOW_SCREEN_MARGIN and frameWidth > 0 then
+		scale = math.min(scale, (parentWidth - WINDOW_SCREEN_MARGIN) / frameWidth)
+	end
+
+	if parentHeight and parentHeight > WINDOW_SCREEN_MARGIN and frameHeight > 0 then
+		scale = math.min(scale, (parentHeight - WINDOW_SCREEN_MARGIN) / frameHeight)
+	end
+
+	if scale < MIN_WINDOW_SCALE then
+		scale = MIN_WINDOW_SCALE
+	end
+
+	if scale > 1 then
+		scale = 1
+	end
+
+	if self.windowScale ~= scale then
+		self.windowScale = scale
+		frame:SetScale(scale)
+		WEP:Log("PartyInterference", "window_scale_set", {
+			scale = scale,
+			height = desiredHeight,
+		})
+	else
+		frame:SetScale(scale)
+	end
+end
+
 function PartyInterference:GetPercentLabel()
 	local actionConfig = self:GetSelectedAction()
 	return actionConfig and actionConfig.percentLabel or "Percent"
@@ -484,6 +663,7 @@ function PartyInterference:SelectAction(index)
 	end
 
 	self.selectedActionIndex = index
+	self:ExpandSelectedActionGroup()
 	WEP:Log("PartyInterference", "action_selected", {
 		index = index,
 		action = ACTIONS[index].action,
@@ -748,6 +928,34 @@ function PartyInterference:PrintIncomingNotice(message, payload, result)
 	self:ShowScreenNotice(notice)
 end
 
+local function ensureActionRow(window, index)
+	window.actionRows = window.actionRows or {}
+
+	if window.actionRows[index] then
+		return window.actionRows[index]
+	end
+
+	local row = CreateFrame("Button", nil, window.actionFrame)
+	row:SetHeight(ACTION_ROW_HEIGHT)
+	row:SetPoint("LEFT", window.actionFrame, "LEFT", 0, 0)
+	row:SetPoint("RIGHT", window.actionFrame, "RIGHT", 0, 0)
+
+	row.background = row:CreateTexture(nil, "BACKGROUND")
+	row.background:SetAllPoints(row)
+
+	row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	row.name:SetJustifyH("LEFT")
+	row.name:SetJustifyV("MIDDLE")
+
+	row.toggle = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	row.toggle:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+	row.toggle:SetWidth(24)
+	row.toggle:SetJustifyH("RIGHT")
+
+	window.actionRows[index] = row
+	return row
+end
+
 function PartyInterference:RefreshActionRows()
 	local window = interferenceWindow
 	if not window or not window.actionRows then
@@ -755,18 +963,55 @@ function PartyInterference:RefreshActionRows()
 	end
 
 	local _, selectedIndex = self:GetSelectedAction()
+	local items = self:GetVisibleActionItems()
 
-	for index, row in ipairs(window.actionRows) do
-		local actionConfig = ACTIONS[index]
-		local selected = index == selectedIndex
+	window.actionFrame:SetHeight(#items * ACTION_ROW_HEIGHT)
 
-		row.name:SetText(actionConfig.text)
+	for index, item in ipairs(items) do
+		local row = ensureActionRow(window, index)
 
-		if selected then
-			setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", window.actionFrame, "TOPLEFT", 0, -((index - 1) * ACTION_ROW_HEIGHT))
+		row:SetPoint("RIGHT", window.actionFrame, "RIGHT", 0, 0)
+		row:Show()
+
+		row.name:ClearAllPoints()
+		row.name:SetPoint("RIGHT", row.toggle, "LEFT", -8, 0)
+
+		if item.kind == "group" then
+			local group = item.group
+
+			row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
+			row.name:SetText(group.text)
+			row.name:SetTextColor(1, 0.82, 0.05, 1)
+			row.toggle:SetText(item.expanded and "-" or "+")
+			setSolidColor(row.background, 0.16, 0.11, 0.02, 0.4)
+			row:SetScript("OnClick", function()
+				self:ToggleActionGroup(group.key)
+			end)
 		else
-			setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.12 or 0.04)
+			local actionConfig = item.action
+			local selected = item.index == selectedIndex
+
+			row.name:SetPoint("LEFT", row, "LEFT", ACTION_ROW_INDENT + 8, 0)
+			row.name:SetText(actionConfig.text)
+			row.name:SetTextColor(1, 1, 1, 1)
+			row.toggle:SetText("")
+
+			if selected then
+				setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
+			else
+				setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.12 or 0.04)
+			end
+
+			row:SetScript("OnClick", function()
+				self:SelectAction(item.index)
+			end)
 		end
+	end
+
+	for index = #items + 1, #window.actionRows do
+		window.actionRows[index]:Hide()
 	end
 end
 
@@ -827,10 +1072,10 @@ function PartyInterference:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPPartyInterferenceWindow",
 		title = "Party Interference",
-		width = 470,
-		height = 500,
-		minWidth = 440,
-		minHeight = 470,
+		width = WINDOW_BASE_WIDTH,
+		height = WINDOW_BASE_HEIGHT,
+		minWidth = WINDOW_MIN_WIDTH,
+		minHeight = WINDOW_MIN_HEIGHT,
 		resizable = true,
 		onShow = function()
 			self:RefreshWindow()
@@ -913,43 +1158,9 @@ function PartyInterference:EnsureWindow()
 
 	window.actionFrame = CreateFrame("Frame", nil, content)
 	window.actionFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -6)
-	window.actionFrame:SetSize(
-		(ACTION_COLUMN_WIDTH * ACTION_COLUMNS) + (ACTION_COLUMN_GAP * (ACTION_COLUMNS - 1)),
-		math.ceil(#ACTIONS / ACTION_COLUMNS) * ACTION_ROW_HEIGHT
-	)
-
+	window.actionFrame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+	window.actionFrame:SetHeight(ACTION_GROUP_ROW_HEIGHT * #ACTION_GROUPS)
 	window.actionRows = {}
-
-	for index, actionConfig in ipairs(ACTIONS) do
-		local row = CreateFrame("Button", nil, window.actionFrame)
-		local rowIndex = math.floor((index - 1) / ACTION_COLUMNS)
-		local columnIndex = (index - 1) % ACTION_COLUMNS
-
-		row:SetWidth(ACTION_COLUMN_WIDTH)
-		row:SetHeight(ACTION_ROW_HEIGHT)
-		row:SetPoint(
-			"TOPLEFT",
-			window.actionFrame,
-			"TOPLEFT",
-			columnIndex * (ACTION_COLUMN_WIDTH + ACTION_COLUMN_GAP),
-			-(rowIndex * ACTION_ROW_HEIGHT)
-		)
-
-		row.background = row:CreateTexture(nil, "BACKGROUND")
-		row.background:SetAllPoints(row)
-
-		row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-		row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
-		row.name:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-		row.name:SetJustifyH("LEFT")
-		row.name:SetText(actionConfig.text)
-
-		row:SetScript("OnClick", function()
-			self:SelectAction(index)
-		end)
-
-		window.actionRows[index] = row
-	end
 
 	window.startButton = Form.CreateButton(window.footer, {
 		text = "Start",
@@ -1003,6 +1214,7 @@ function PartyInterference:RefreshWindow(statusText)
 	window.selectedText:SetText("Selected: " .. (selectedTarget and shortName(selectedTarget) or "none"))
 	window.partyList:SetItems(self:GetPartyItems())
 	self:RefreshActionRows()
+	self:ApplyWindowFit()
 
 	setInputValueIfNotFocused(window.durationInput, self.durationSeconds)
 	setInputValueIfNotFocused(window.percentInput, self.percent)
