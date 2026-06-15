@@ -2,7 +2,9 @@ local _, WEP = ...
 
 local PartyInterference = {
 	durationSeconds = 8,
-	intensity = 70,
+	percent = 70,
+	customMessage = "",
+	includeSender = true,
 	selectedTarget = nil,
 	counter = 0,
 }
@@ -14,7 +16,6 @@ local FEATURE_ID = "partyInterference"
 PartyInterference.title = "Party Interference"
 PartyInterference.description = "Send temporary screen, UI, and sound interference to party friends."
 
-local Timer = WEP.Tools.Timer
 local Player = WEP.Tools.Player
 local Party = WEP.Tools.Party
 local Interference = WEP.Tools.Interference
@@ -30,9 +31,10 @@ local MSG_ACTION = "party_interference_action"
 local MIN_DURATION_SECONDS = 1
 local MAX_DURATION_SECONDS = 30
 local DEFAULT_DURATION_SECONDS = 8
-local MIN_INTENSITY = 10
-local MAX_INTENSITY = 95
-local DEFAULT_INTENSITY = 70
+local MIN_PERCENT = 10
+local MAX_PERCENT = 95
+local DEFAULT_PERCENT = 70
+local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 
 local ALLOWED_UI_GROUPS = {
@@ -87,6 +89,10 @@ local function isBlank(value)
 	return value == nil or tostring(value) == ""
 end
 
+local function trim(value)
+	return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 local function clamp(value, minValue, maxValue, defaultValue)
 	value = tonumber(value) or defaultValue
 
@@ -99,6 +105,25 @@ local function clamp(value, minValue, maxValue, defaultValue)
 	end
 
 	return math.floor(value)
+end
+
+local function sanitizeMessage(value)
+	local message = trim(value):gsub("[%c%%~|;=]", " "):gsub("%s+", " ")
+
+	if #message > MAX_MESSAGE_LENGTH then
+		message = message:sub(1, MAX_MESSAGE_LENGTH)
+	end
+
+	return message
+end
+
+local function getCheckedValue(checkButton)
+	if not checkButton or not checkButton.GetChecked then
+		return false
+	end
+
+	local checked = checkButton:GetChecked()
+	return checked == true or checked == 1
 end
 
 local function shortName(name)
@@ -174,6 +199,10 @@ local function getPayloadNumber(payload, key, minValue, maxValue, defaultValue)
 	return clamp(payload and payload[key], minValue, maxValue, defaultValue)
 end
 
+local function shouldShowSender(payload)
+	return tostring(payload and payload.n or "1") ~= "0"
+end
+
 function PartyInterference:IsEnabled()
 	return WEP:IsFeatureEnabled(FEATURE_ID)
 end
@@ -195,7 +224,7 @@ end
 
 function PartyInterference:MakeEffectId()
 	self.counter = self.counter + 1
-	return "pi" .. Timer.Now() .. "." .. self.counter
+	return tostring(self.counter)
 end
 
 function PartyInterference:MakeIncomingEffectId(message, payload)
@@ -296,16 +325,24 @@ function PartyInterference:ReadWindowSettings()
 		)
 	end
 
-	if window and window.intensityInput then
-		self.intensity = clamp(
-			window.intensityInput:GetValue(),
-			MIN_INTENSITY,
-			MAX_INTENSITY,
-			self.intensity or DEFAULT_INTENSITY
+	if window and window.percentInput then
+		self.percent = clamp(
+			window.percentInput:GetValue(),
+			MIN_PERCENT,
+			MAX_PERCENT,
+			self.percent or DEFAULT_PERCENT
 		)
 	end
 
-	return self.durationSeconds, self.intensity
+	if window and window.messageInput then
+		self.customMessage = sanitizeMessage(window.messageInput:GetValue())
+	end
+
+	if window and window.senderCheck then
+		self.includeSender = getCheckedValue(window.senderCheck)
+	end
+
+	return self.durationSeconds, self.percent
 end
 
 function PartyInterference:SendAction(actionConfig)
@@ -324,12 +361,17 @@ function PartyInterference:SendAction(actionConfig)
 	self:ReadWindowSettings()
 
 	local payload = {
-		t = target,
+		t = shortName(target),
 		a = actionConfig.action,
 		d = self.durationSeconds,
-		i = self.intensity,
+		i = self.percent,
+		n = self.includeSender and "1" or "0",
 		id = self:MakeEffectId(),
 	}
+
+	if not isBlank(self.customMessage) then
+		payload.m = self.customMessage
+	end
 
 	if actionConfig.group then
 		payload.g = actionConfig.group
@@ -374,12 +416,11 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 
 	if action == "clear" then
 		local count = Interference.ClearBySource(message.sender)
-		WEP:Print("Interference cleared by", shortName(message.sender) .. ".", "Effects:", count)
 		WEP:Log("PartyInterference", "incoming_clear_applied", {
 			sender = message.sender,
 			count = count,
 		})
-		return true
+		return true, count
 	end
 
 	if action == "darken" then
@@ -388,7 +429,7 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 			action = "blackout",
 			source = message.sender,
 			duration = getPayloadNumber(payload, "d", MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, DEFAULT_DURATION_SECONDS),
-			intensity = getPayloadNumber(payload, "i", MIN_INTENSITY, MAX_INTENSITY, DEFAULT_INTENSITY),
+			intensity = getPayloadNumber(payload, "i", MIN_PERCENT, MAX_PERCENT, DEFAULT_PERCENT),
 		})
 	end
 
@@ -418,6 +459,40 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 	end
 
 	return false, "unknown action"
+end
+
+function PartyInterference:PrintIncomingNotice(message, payload, result)
+	local customMessage = sanitizeMessage(payload and payload.m)
+	local includeSender = shouldShowSender(payload)
+	local senderName = shortName(message and message.sender or "unknown")
+	local action = payload and payload.a or ""
+	local actionText = actionLabels[action] or action or "Interference"
+
+	if customMessage ~= "" then
+		if includeSender then
+			WEP:Print(senderName .. ":", customMessage)
+		else
+			WEP:Print(customMessage)
+		end
+
+		return
+	end
+
+	if action == "clear" then
+		if includeSender then
+			WEP:Print("Interference cleared by", senderName .. ".", "Effects:", result or 0)
+		else
+			WEP:Print("Interference cleared.", "Effects:", result or 0)
+		end
+
+		return
+	end
+
+	if includeSender then
+		WEP:Print("Interference from", senderName .. ":", actionText)
+	else
+		WEP:Print("Interference:", actionText)
+	end
 end
 
 function PartyInterference:OnActionMessage(message)
@@ -460,9 +535,7 @@ function PartyInterference:OnActionMessage(message)
 		effectId = idOrErr or "none",
 	})
 
-	if payload.a ~= "clear" then
-		WEP:Print("Interference from", shortName(message.sender) .. ":", actionLabels[payload.a] or payload.a)
-	end
+	self:PrintIncomingNotice(message, payload, idOrErr)
 end
 
 function PartyInterference:EnsureWindow()
@@ -479,8 +552,8 @@ function PartyInterference:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPPartyInterferenceWindow",
 		title = "Party Interference",
-		width = 520,
-		height = 390,
+		width = 560,
+		height = 430,
 		onShow = function()
 			self:RefreshWindow()
 		end,
@@ -532,13 +605,29 @@ function PartyInterference:EnsureWindow()
 	})
 	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 22, 0)
 
-	window.intensityInput = Form.CreateInput(content, {
-		label = "Darkness",
-		value = self.intensity,
+	window.percentInput = Form.CreateInput(content, {
+		label = "Percent",
+		value = self.percent,
 		numeric = true,
 		width = 100,
 	})
-	window.intensityInput:SetPoint("LEFT", window.durationInput, "RIGHT", 16, 0)
+	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 16, 0)
+
+	window.messageInput = Form.CreateInput(content, {
+		label = "Message",
+		value = self.customMessage,
+		width = 220,
+		maxLetters = MAX_MESSAGE_LENGTH,
+	})
+	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -10)
+
+	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", -4, -4)
+	window.senderCheck:SetChecked(self.includeSender ~= false)
+
+	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
+	window.senderCheckLabel:SetText("Include sender name")
 
 	window.actionButtons = {}
 	local previousButton
@@ -553,7 +642,7 @@ function PartyInterference:EnsureWindow()
 		})
 
 		if index == 1 then
-			button:SetPoint("TOPLEFT", window.partyList.frame, "BOTTOMLEFT", 0, -18)
+			button:SetPoint("TOPLEFT", window.partyList.frame, "BOTTOMLEFT", 0, -28)
 		elseif index == 4 then
 			button:SetPoint("TOPLEFT", window.actionButtons[1], "BOTTOMLEFT", 0, -8)
 		else
@@ -593,6 +682,8 @@ function PartyInterference:RefreshWindow(statusText)
 		return
 	end
 
+	self:ReadWindowSettings()
+
 	local members = self:GetPartyMembers()
 	local selectedTarget = self:GetSelectedTarget()
 	local hasTarget = selectedTarget ~= nil
@@ -603,7 +694,12 @@ function PartyInterference:RefreshWindow(statusText)
 	window.partyList:SetItems(self:GetPartyItems())
 
 	setInputValueIfNotFocused(window.durationInput, self.durationSeconds)
-	setInputValueIfNotFocused(window.intensityInput, self.intensity)
+	setInputValueIfNotFocused(window.percentInput, self.percent)
+	setInputValueIfNotFocused(window.messageInput, self.customMessage)
+
+	if window.senderCheck then
+		window.senderCheck:SetChecked(self.includeSender ~= false)
+	end
 
 	for _, button in ipairs(window.actionButtons or {}) do
 		setButtonEnabled(button, hasTarget)
