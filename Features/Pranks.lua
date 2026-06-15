@@ -164,20 +164,20 @@ local categoryLabels = {
 }
 
 local actionDescriptions = {
-	darken = "Temporarily darken their screen.",
+	darken = "Darkens their screen briefly.",
 	hide_ui = {
-		actionbars = "Hide their action bars for the selected duration.",
-		chat = "Hide their chat frame for the selected duration.",
-		minimap = "Hide their minimap for the selected duration.",
-		unitframes = "Hide their unit frames and health for the selected duration.",
+		actionbars = "Hides their action bars.",
+		chat = "Hides their chat frame.",
+		minimap = "Hides their minimap.",
+		unitframes = "Hides unit frames and health.",
 	},
-	sound = "Play the WEP alert sound once.",
+	sound = "Plays the WEP alert sound once.",
 	sound_trap = {
-		cast = "Play Error when they start casting.",
-		combat = "Play FBI Open Up when they enter combat.",
-		enemy_target = "Play Nani when they target a hostile unit.",
-		target = "Play Hello There when they target a party member.",
-		walk = "Play Vine Boom while they move.",
+		cast = "Plays Error when they cast.",
+		combat = "Plays FBI Open Up in combat.",
+		enemy_target = "Plays Nani on hostile target.",
+		target = "Plays Hello There on party target.",
+		walk = "Plays Vine Boom while they move.",
 	},
 }
 
@@ -818,16 +818,20 @@ local function ensureActionRow(window, index)
 
 	row.title = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	row.title:SetPoint("TOPLEFT", row.check, "TOPRIGHT", 2, -4)
-	row.title:SetWidth(250)
+	row.title:SetWidth(220)
 	row.title:SetJustifyH("LEFT")
 
 	row.description = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
 	row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -2)
-	row.description:SetWidth(305)
+	row.description:SetWidth(250)
 	row.description:SetJustifyH("LEFT")
+	row.description:SetJustifyV("TOP")
+	if row.description.SetWordWrap then
+		row.description:SetWordWrap(false)
+	end
 
 	row.type = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	row.type:SetPoint("RIGHT", row, "RIGHT", -74, 0)
+	row.type:SetPoint("TOPRIGHT", row, "TOPRIGHT", -74, -5)
 	row.type:SetWidth(110)
 	row.type:SetJustifyH("RIGHT")
 
