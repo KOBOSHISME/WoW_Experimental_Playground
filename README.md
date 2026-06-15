@@ -292,7 +292,21 @@ local snapshot = WEP.Tools.Environment.GetSnapshot()
 
 ## Installation
 
-To install during development:
+To install or update from Git on Windows, run:
+
+```text
+Install-WEP-Addon.bat
+```
+
+The installer looks for a WoW Classic AddOns folder, installs Git with `winget` if Git is missing, then clones this repository into `WoW_Experimental_Playground`. If the addon folder already exists, local changes in that folder are overwritten so the latest `main` branch is installed.
+
+If your WoW install is in a custom location, pass the AddOns path:
+
+```text
+Install-WEP-Addon.bat "C:\Path\World of Warcraft\_classic_era_\Interface\AddOns"
+```
+
+Manual install during development still works:
 
 1. Copy the addon folder into your WoW Classic addons directory.
 2. Make sure the folder name matches the `.toc` file name.
