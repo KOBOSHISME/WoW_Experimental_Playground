@@ -20,7 +20,11 @@ local DEFAULTS = {
 	features = {
 		hideSeek = true,
 		partyInterference = true,
+		soundEvents = true,
 		toolDebug = true,
+	},
+	soundEvents = {
+		triggers = {},
 	},
 	log = {
 		enabled = true,

@@ -98,6 +98,16 @@ function Diagnostics:HandleSlash(input)
 		return
 	end
 
+	if args[1] == "sounds" or args[1] == "soundevents" then
+		if WEP.SoundEvents and WEP.SoundEvents.HandleSlash then
+			WEP.SoundEvents:HandleSlash(args)
+		else
+			WEP:Print("Sound Events feature is unavailable.")
+		end
+
+		return
+	end
+
 	if args[1] == "debug" and (args[2] == "tools" or args[2] == "tool") then
 		local toolArgs = {
 			"tools",
@@ -157,6 +167,7 @@ function Diagnostics.PrintHelp()
 	WEP:Print("/wep comm debug [on|off] - Toggle communication debug messages.")
 	WEP:Print("/wep hide - Open Hide and Seek.")
 	WEP:Print("/wep interfere - Open Party Interference.")
+	WEP:Print("/wep sounds - Open Sound Events.")
 	WEP:Print("/wep tools help - Show tool debug commands.")
 end
 

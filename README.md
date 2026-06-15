@@ -97,6 +97,19 @@ Core interference actions can darken their screen, hide unit frames/health, hide
 
 Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-900 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
 
+## Sound Events
+
+Sound Events plays local custom sounds when built-in triggers happen. Open it with:
+
+```text
+/wep sounds
+/wep soundevents
+```
+
+The panel lists each trigger with an on/off checkbox and a Test button for its sound. Trigger toggles persist in `WEPDB.soundEvents.triggers`.
+
+Current triggers are Warrior Charge, which plays Deja Vu when your warrior or a party warrior successfully casts Charge, and Dungeon Entry, which plays Okay Lets Go when you enter a dungeon instance. Dungeon Entry ignores raids and battlegrounds and stays quiet when reloading while already inside a dungeon.
+
 ## Tool Debug Commands
 
 Reusable tools can be tested from chat with:
