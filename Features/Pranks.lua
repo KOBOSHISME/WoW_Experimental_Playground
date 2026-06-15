@@ -50,8 +50,13 @@ local WINDOW_MIN_HEIGHT = 430
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
+	bags = true,
+	buffs = true,
+	casting = true,
 	chat = true,
+	micromenu = true,
 	minimap = true,
+	questtracker = true,
 	unitframes = true,
 }
 
@@ -60,6 +65,85 @@ local ACTIONS = {
 		category = "visual",
 		text = "Darken Screen",
 		action = "darken",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Red Alert",
+		action = "tint",
+		variant = "red",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Fel Goggles",
+		action = "tint",
+		variant = "fel",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Arcane Haze",
+		action = "tint",
+		variant = "arcane",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Snowblind",
+		action = "tint",
+		variant = "snow",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Panic Flash",
+		action = "pulse",
+		variant = "panic",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Tunnel Vision",
+		action = "vignette",
+		variant = "tunnel",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Letterbox",
+		action = "letterbox",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Fake Raid Warning",
+		action = "fake_notice",
+		variant = "raid",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Error Storm",
+		action = "fake_notice",
+		variant = "error",
+		percentLabel = "Intensity",
+		usesPercent = true,
+	},
+	{
+		category = "visual",
+		text = "Loot Mirage",
+		action = "fake_notice",
+		variant = "loot",
 		percentLabel = "Intensity",
 		usesPercent = true,
 	},
@@ -86,6 +170,36 @@ local ACTIONS = {
 		text = "Hide Chat",
 		action = "hide_ui",
 		group = "chat",
+	},
+	{
+		category = "ui",
+		text = "Hide Buffs",
+		action = "hide_ui",
+		group = "buffs",
+	},
+	{
+		category = "ui",
+		text = "Hide Cast Bars",
+		action = "hide_ui",
+		group = "casting",
+	},
+	{
+		category = "ui",
+		text = "Hide Bags",
+		action = "hide_ui",
+		group = "bags",
+	},
+	{
+		category = "ui",
+		text = "Hide Micro Menu",
+		action = "hide_ui",
+		group = "micromenu",
+	},
+	{
+		category = "ui",
+		text = "Hide Quest Tracker",
+		action = "hide_ui",
+		group = "questtracker",
 	},
 	{
 		category = "sound_traps",
@@ -143,10 +257,27 @@ local ACTIONS = {
 local actionLabels = {
 	clear = "Clear Effects",
 	darken = "Darken Screen",
+	fake_notice = "Fake Notice",
 	hide_ui = "Hide UI",
+	letterbox = "Letterbox",
+	pulse = "Panic Flash",
 	sound = "Play Alert",
 	sound_trap = "Sound Trap",
+	tint = "Screen Tint",
 	trap = "Sound Trap",
+	vignette = "Tunnel Vision",
+}
+
+local visualVariantLabels = {
+	arcane = "Arcane Haze",
+	error = "Error Storm",
+	fel = "Fel Goggles",
+	loot = "Loot Mirage",
+	panic = "Panic Flash",
+	raid = "Fake Raid Warning",
+	red = "Red Alert",
+	snow = "Snowblind",
+	tunnel = "Tunnel Vision",
 }
 
 local trapLabels = {
@@ -165,11 +296,25 @@ local categoryLabels = {
 
 local actionDescriptions = {
 	darken = "Darkens their screen briefly.",
+	fake_notice = {
+		error = "Shows fake red error spam.",
+		loot = "Shows a fake loot message.",
+		raid = "Shows a fake raid warning.",
+	},
 	hide_ui = {
 		actionbars = "Hides their action bars.",
+		bags = "Hides bag buttons.",
+		buffs = "Hides buff and debuff icons.",
+		casting = "Hides cast bars.",
 		chat = "Hides their chat frame.",
+		micromenu = "Hides the micro menu.",
 		minimap = "Hides their minimap.",
+		questtracker = "Hides the quest tracker.",
 		unitframes = "Hides unit frames and health.",
+	},
+	letterbox = "Adds black cinematic bars.",
+	pulse = {
+		panic = "Pulses a red panic flash.",
 	},
 	sound = "Plays the WEP alert sound once.",
 	sound_trap = {
@@ -178,6 +323,15 @@ local actionDescriptions = {
 		enemy_target = "Plays Nani on hostile target.",
 		target = "Plays Hello There on party target.",
 		walk = "Plays Vine Boom while they move.",
+	},
+	tint = {
+		arcane = "Tints their screen purple.",
+		fel = "Tints their screen fel green.",
+		red = "Tints their screen red.",
+		snow = "Tints their screen white.",
+	},
+	vignette = {
+		tunnel = "Darkens screen edges heavily.",
 	},
 }
 
@@ -302,6 +456,20 @@ local function normalizeTrapTrigger(trigger)
 	return SoundTriggers.NormalizeTrigger(trigger)
 end
 
+local function normalizeVariant(variant)
+	local value = trim(variant):lower():gsub("[^a-z0-9_%-]", "")
+
+	if value == "" then
+		return nil
+	end
+
+	if #value > 20 then
+		value = value:sub(1, 20)
+	end
+
+	return value
+end
+
 local function getPayloadNumber(payload, key, minValue, maxValue, defaultValue)
 	return clamp(payload and payload[key], minValue, maxValue, defaultValue)
 end
@@ -333,7 +501,10 @@ local function getActionDescription(actionConfig)
 
 	local actionDescription = actionDescriptions[actionConfig.action]
 	if type(actionDescription) == "table" then
-		return actionDescription[actionConfig.group] or actionDescription[actionConfig.trigger] or ""
+		return actionDescription[actionConfig.group]
+			or actionDescription[actionConfig.trigger]
+			or actionDescription[actionConfig.variant]
+			or ""
 	end
 
 	return actionDescription or ""
@@ -603,6 +774,10 @@ function PartyInterference:SendAction(actionConfig)
 		payload.i = self.percent
 	end
 
+	if actionConfig.variant then
+		payload.v = actionConfig.variant
+	end
+
 	if not isBlank(self.customMessage) then
 		payload.m = self.customMessage
 	end
@@ -636,6 +811,7 @@ function PartyInterference:SendAction(actionConfig)
 		action = actionConfig.action,
 		group = actionConfig.group or "none",
 		trigger = actionConfig.trigger or "none",
+		variant = actionConfig.variant or "none",
 		sound = payload.s or "none",
 		messageId = messageIdOrErr,
 	})
@@ -681,6 +857,18 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 			source = message.sender,
 			duration = getPayloadNumber(payload, "d", MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, DEFAULT_DURATION_SECONDS),
 			intensity = getPayloadNumber(payload, "i", MIN_PERCENT, MAX_PERCENT, DEFAULT_PERCENT),
+		})
+	end
+
+	if action == "tint" or action == "pulse" or action == "vignette" or action == "letterbox" or action == "fake_notice" then
+		return Interference.Apply({
+			id = self:MakeIncomingEffectId(message, payload),
+			action = action,
+			source = message.sender,
+			duration = getPayloadNumber(payload, "d", MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, DEFAULT_DURATION_SECONDS),
+			intensity = getPayloadNumber(payload, "i", MIN_PERCENT, MAX_PERCENT, DEFAULT_PERCENT),
+			variant = normalizeVariant(payload.v),
+			message = sanitizeMessage(payload.m),
 		})
 	end
 
@@ -733,9 +921,14 @@ function PartyInterference:BuildIncomingNotice(message, payload, result)
 	local action = payload and payload.a or ""
 	local actionText = actionLabels[action] or action or "Prank"
 	local trigger = normalizeTrapTrigger(payload and payload.k)
+	local variant = normalizeVariant(payload and payload.v)
 
 	if action == "sound_trap" or action == "trap" then
 		actionText = trigger and trapLabels[trigger] or actionText
+	end
+
+	if action == "tint" or action == "pulse" or action == "vignette" or action == "fake_notice" then
+		actionText = variant and visualVariantLabels[variant] or actionText
 	end
 
 	if customMessage ~= "" then

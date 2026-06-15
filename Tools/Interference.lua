@@ -74,6 +74,8 @@ local function copyEffectStatus(effect)
 		group = effect.group,
 		sound = effect.sound,
 		trigger = effect.trigger,
+		variant = effect.variant,
+		message = effect.message,
 		chance = effect.chance,
 		intensity = effect.intensity,
 		startedAt = effect.startedAt,
@@ -112,6 +114,16 @@ end
 local function clearEffect(effect)
 	if effect.action == "blackout" then
 		ScreenOverlay.ClearBlackoutFor(effect.id)
+	elseif effect.action == "tint" then
+		ScreenOverlay.ClearTintFor(effect.id)
+	elseif effect.action == "pulse" then
+		ScreenOverlay.ClearPulseFor(effect.id)
+	elseif effect.action == "vignette" then
+		ScreenOverlay.ClearVignetteFor(effect.id)
+	elseif effect.action == "letterbox" then
+		ScreenOverlay.ClearLetterboxFor(effect.id)
+	elseif effect.action == "fake_notice" then
+		ScreenOverlay.ClearFakeNoticeFor(effect.id)
 	elseif effect.action == "hide_ui" then
 		UIVisibility.ShowFor(effect.id, effect.group)
 	elseif effect.action == "sound" then
@@ -171,6 +183,26 @@ end
 local function applyEffect(effect)
 	if effect.action == "blackout" then
 		return ScreenOverlay.SetBlackoutFor(effect.id, effect.intensity)
+	end
+
+	if effect.action == "tint" then
+		return ScreenOverlay.SetTintFor(effect.id, effect.variant, effect.intensity)
+	end
+
+	if effect.action == "pulse" then
+		return ScreenOverlay.SetPulseFor(effect.id, effect.variant, effect.intensity)
+	end
+
+	if effect.action == "vignette" then
+		return ScreenOverlay.SetVignetteFor(effect.id, effect.variant, effect.intensity)
+	end
+
+	if effect.action == "letterbox" then
+		return ScreenOverlay.SetLetterboxFor(effect.id, effect.intensity)
+	end
+
+	if effect.action == "fake_notice" then
+		return ScreenOverlay.ShowFakeNoticeFor(effect.id, effect.variant, effect.message, effect.intensity)
 	end
 
 	if effect.action == "hide_ui" then
@@ -243,6 +275,8 @@ function Interference.Apply(effect)
 		group = effect.group,
 		sound = effect.sound or DEFAULT_SOUND,
 		trigger = trigger,
+		variant = effect.variant or effect.preset,
+		message = effect.message,
 		chance = clamp(effect.chance or effect.intensity, 0, 100, 100),
 		intensity = clamp(effect.intensity, MIN_INTENSITY, MAX_INTENSITY, DEFAULT_INTENSITY),
 		duration = clamp(effect.duration, MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, DEFAULT_DURATION_SECONDS),
