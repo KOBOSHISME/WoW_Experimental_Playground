@@ -31,12 +31,26 @@ local MAX_INTENSITY = 95
 local DEFAULT_SOUND = "wep_alert"
 local DEFAULT_SOUND_INTERVAL_SECONDS = 1.5
 local SOUND_PLAY_SECONDS = 1
-local DEFAULT_SOUND_TRAP_CHANCE = 70
+local DEFAULT_SOUND_TRAP_CHANCE = 100
+local MAX_SOUND_TRAP_CHANCE = 100
 local DEFAULT_SOUND_TRAP_COOLDOWN_SECONDS = 2
 local MOVEMENT_CHECK_SECONDS = 0.25
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
+end
+
+local function safeCall(fn, ...)
+	if type(fn) ~= "function" then
+		return nil
+	end
+
+	local ok, first, second, third = pcall(fn, ...)
+	if not ok then
+		return nil
+	end
+
+	return first, second, third
 end
 
 local function clamp(value, minValue, maxValue, defaultValue)
@@ -78,7 +92,6 @@ local function copyEffectStatus(effect)
 		sound = effect.sound,
 		trigger = effect.trigger,
 		chance = effect.chance,
-		threshold = effect.threshold,
 		intensity = effect.intensity,
 		startedAt = effect.startedAt,
 		expiresAt = effect.expiresAt,
@@ -126,8 +139,8 @@ local function normalizeTrigger(trigger)
 		return "cast"
 	end
 
-	if normalized == "h" then
-		return "low_health"
+	if normalized == "e" then
+		return "enemy_target"
 	end
 
 	if normalized == "move" or normalized == "movement" or normalized == "walking" then
@@ -142,15 +155,15 @@ local function normalizeTrigger(trigger)
 		return "cast"
 	end
 
-	if normalized == "health" or normalized == "lowhealth" or normalized == "low_health_panic" then
-		return "low_health"
+	if normalized == "enemy" or normalized == "hostile" or normalized == "hostile_target" then
+		return "enemy_target"
 	end
 
 	if normalized == "walk"
 		or normalized == "target"
+		or normalized == "enemy_target"
 		or normalized == "combat"
 		or normalized == "cast"
-		or normalized == "low_health"
 	then
 		return normalized
 	end
@@ -163,7 +176,7 @@ local function isSoundTrap(effect)
 end
 
 local function getTrapCooldown(trigger)
-	if trigger == "combat" or trigger == "low_health" then
+	if trigger == "combat" then
 		return 0.5
 	end
 
@@ -209,37 +222,71 @@ local function forEachSoundTrap(trigger, callback)
 	end
 end
 
-local function getPlayerHealthPercent()
-	if not UnitHealth or not UnitHealthMax then
-		return nil
-	end
-
-	local health = UnitHealth("player")
-	local healthMax = UnitHealthMax("player")
-
-	if not healthMax or healthMax <= 0 then
-		return nil
-	end
-
-	return (health or 0) / healthMax * 100
-end
-
-local function isPlayerBelowThreshold(effect)
-	local percent = getPlayerHealthPercent()
-	return percent and percent <= effect.threshold
-end
-
 local function isPlayerMoving()
-	if not GetUnitSpeed then
+	local speed = safeCall(GetUnitSpeed, "player")
+
+	if type(speed) ~= "number" then
+		speed = safeCall(UnitSpeed, "player")
+	end
+
+	if type(speed) == "number" then
+		return speed > 0
+	end
+
+	if not C_Map or not C_Map.GetBestMapForUnit or not C_Map.GetPlayerMapPosition then
 		return false
 	end
 
-	return (tonumber(GetUnitSpeed("player")) or 0) > 0
+	local mapId = safeCall(C_Map.GetBestMapForUnit, "player")
+	local position = mapId and safeCall(C_Map.GetPlayerMapPosition, mapId, "player") or nil
+	if not position then
+		return false
+	end
+
+	local x, y
+	if position.GetXY then
+		x, y = position:GetXY()
+	elseif position.x and position.y then
+		x, y = position.x, position.y
+	end
+
+	if type(x) ~= "number" or type(y) ~= "number" then
+		return false
+	end
+
+	local moving = Interference.lastMovementMapId == mapId
+		and Interference.lastMovementX
+		and Interference.lastMovementY
+		and (math.abs(x - Interference.lastMovementX) > 0.00001 or math.abs(y - Interference.lastMovementY) > 0.00001)
+
+	Interference.lastMovementMapId = mapId
+	Interference.lastMovementX = x
+	Interference.lastMovementY = y
+
+	return moving == true
 end
 
-local function getTargetPartyMemberName()
-	if not UnitExists or not UnitExists("target") or not UnitName then
+local function isTargetPartyMember()
+	if not UnitExists or not UnitExists("target") then
 		return nil
+	end
+
+	if UnitIsUnit then
+		for index = 1, 4 do
+			local unit = "party" .. index
+
+			if UnitExists(unit) and UnitIsUnit("target", unit) then
+				return true
+			end
+		end
+
+		if UnitIsUnit("target", "player") then
+			return true
+		end
+	end
+
+	if not UnitName then
+		return false
 	end
 
 	local name, realm
@@ -252,7 +299,7 @@ local function getTargetPartyMemberName()
 	end
 
 	if isBlank(name) then
-		return nil
+		return false
 	end
 
 	local fullName = name
@@ -263,10 +310,26 @@ local function getTargetPartyMemberName()
 	end
 
 	if Party and Party.IsPartyMember and (Party.IsPartyMember(fullName) or Party.IsPartyMember(name)) then
-		return fullName
+		return true
 	end
 
-	return nil
+	return Player.IsSelf(name) or Player.IsSelf(fullName)
+end
+
+local function isTargetEnemy()
+	if not UnitExists or not UnitExists("target") then
+		return false
+	end
+
+	if UnitCanAttack and UnitCanAttack("player", "target") then
+		return true
+	end
+
+	if UnitIsEnemy and UnitIsEnemy("player", "target") then
+		return true
+	end
+
+	return false
 end
 
 local function shouldAttemptSound(effect)
@@ -342,12 +405,7 @@ end
 
 local function initializeSoundTrap(effect)
 	effect.soundHandles = {}
-	effect.oneShot = effect.trigger == "combat" or effect.trigger == "low_health"
-	effect.ignoreChance = effect.trigger == "low_health"
-
-	if effect.trigger == "low_health" then
-		effect.wasBelowThreshold = isPlayerBelowThreshold(effect) == true
-	end
+	effect.oneShot = effect.trigger == "combat"
 
 	if updateTrapRuntime then
 		updateTrapRuntime()
@@ -374,29 +432,17 @@ handleTrapUpdate = function(_, elapsed)
 	end)
 end
 
-local function handleHealthEvent(unit)
-	if unit ~= "player" then
-		return
-	end
-
-	forEachSoundTrap("low_health", function(effect)
-		local belowThreshold = isPlayerBelowThreshold(effect) == true
-
-		if belowThreshold and not effect.wasBelowThreshold then
-			attemptTrapSound(effect, "low_health")
-		end
-
-		effect.wasBelowThreshold = belowThreshold
-	end)
-end
-
 handleTrapEvent = function(event, ...)
 	if event == "PLAYER_TARGET_CHANGED" then
-		local targetName = getTargetPartyMemberName()
-
-		if targetName then
+		if isTargetPartyMember() then
 			forEachSoundTrap("target", function(effect)
 				attemptTrapSound(effect, "target_party")
+			end)
+		end
+
+		if isTargetEnemy() then
+			forEachSoundTrap("enemy_target", function(effect)
+				attemptTrapSound(effect, "enemy_target")
 			end)
 		end
 
@@ -421,10 +467,6 @@ handleTrapEvent = function(event, ...)
 
 		return
 	end
-
-	if event == "UNIT_HEALTH" or event == "UNIT_HEALTH_FREQUENT" then
-		handleHealthEvent(...)
-	end
 end
 
 updateTrapRuntime = function()
@@ -432,7 +474,6 @@ updateTrapRuntime = function()
 	local needsTarget = false
 	local needsCombat = false
 	local needsCast = false
-	local needsHealth = false
 	local hasSoundTrap = false
 
 	for _, effect in pairs(Interference.activeEffects) do
@@ -441,14 +482,12 @@ updateTrapRuntime = function()
 
 			if effect.trigger == "walk" then
 				needsMovement = true
-			elseif effect.trigger == "target" then
+			elseif effect.trigger == "target" or effect.trigger == "enemy_target" then
 				needsTarget = true
 			elseif effect.trigger == "combat" then
 				needsCombat = true
 			elseif effect.trigger == "cast" then
 				needsCast = true
-			elseif effect.trigger == "low_health" then
-				needsHealth = true
 			end
 		end
 	end
@@ -476,11 +515,6 @@ updateTrapRuntime = function()
 		registerTrapEvent(frame, "UNIT_SPELLCAST_START")
 	end
 
-	if needsHealth then
-		registerTrapEvent(frame, "UNIT_HEALTH")
-		registerTrapEvent(frame, "UNIT_HEALTH_FREQUENT")
-	end
-
 	if needsMovement then
 		frame:SetScript("OnUpdate", handleTrapUpdate)
 	else
@@ -493,7 +527,6 @@ updateTrapRuntime = function()
 		target = needsTarget,
 		combat = needsCombat,
 		cast = needsCast,
-		health = needsHealth,
 	})
 end
 
@@ -612,8 +645,7 @@ function Interference.Apply(effect)
 		group = effect.group,
 		sound = effect.sound or DEFAULT_SOUND,
 		trigger = trigger,
-		chance = clamp(effect.chance or effect.intensity, MIN_INTENSITY, MAX_INTENSITY, DEFAULT_SOUND_TRAP_CHANCE),
-		threshold = clamp(effect.threshold or effect.intensity, MIN_INTENSITY, MAX_INTENSITY, DEFAULT_SOUND_TRAP_CHANCE),
+		chance = clamp(effect.chance or effect.intensity, 0, MAX_SOUND_TRAP_CHANCE, DEFAULT_SOUND_TRAP_CHANCE),
 		intensity = clamp(effect.intensity, MIN_INTENSITY, MAX_INTENSITY, DEFAULT_INTENSITY),
 		duration = clamp(effect.duration, MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, DEFAULT_DURATION_SECONDS),
 		repeatInterval = clamp(effect.repeatInterval, 0.5, 5, DEFAULT_SOUND_INTERVAL_SECONDS),

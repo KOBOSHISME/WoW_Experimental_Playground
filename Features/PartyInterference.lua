@@ -7,7 +7,6 @@ local PartyInterference = {
 	includeSender = true,
 	selectedTarget = nil,
 	selectedActionIndex = 1,
-	selectedSoundIndex = 1,
 	counter = 0,
 }
 
@@ -26,7 +25,6 @@ local UIVisibility = WEP.Tools.UIVisibility
 local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
 local List = WEP.Tools.List
-local Sound = WEP.Tools.Sound
 
 WEP:Log("PartyInterference", "loaded")
 
@@ -41,7 +39,10 @@ local DEFAULT_PERCENT = 70
 local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
-local ACTION_ROW_HEIGHT = 22
+local ACTION_ROW_HEIGHT = 24
+local ACTION_COLUMNS = 2
+local ACTION_COLUMN_WIDTH = 196
+local ACTION_COLUMN_GAP = 10
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -54,38 +55,33 @@ local ACTIONS = {
 	{
 		text = "Darken Screen",
 		action = "darken",
-		detail = "Screen overlay",
 		percentLabel = "Intensity",
+		usesPercent = true,
 	},
 	{
 		text = "Hide Health",
 		action = "hide_ui",
 		group = "unitframes",
-		detail = "Unit frames",
 	},
 	{
 		text = "Hide Bars",
 		action = "hide_ui",
 		group = "actionbars",
-		detail = "Action bars",
 	},
 	{
 		text = "Hide Minimap",
 		action = "hide_ui",
 		group = "minimap",
-		detail = "Minimap",
 	},
 	{
 		text = "Hide Chat",
 		action = "hide_ui",
 		group = "chat",
-		detail = "Chat frame",
 	},
 	{
 		text = "Play Alert",
 		action = "sound",
 		sound = DEFAULT_SOUND,
-		detail = "Repeating sound",
 	},
 	{
 		text = "Boom Walk",
@@ -93,9 +89,7 @@ local ACTIONS = {
 		wireAction = "trap",
 		trigger = "walk",
 		wireTrigger = "w",
-		usesSelectedSound = true,
-		detail = "Sound while moving",
-		percentLabel = "Chance",
+		sound = "wep_vine_boom",
 	},
 	{
 		text = "Target Sting",
@@ -103,9 +97,7 @@ local ACTIONS = {
 		wireAction = "trap",
 		trigger = "target",
 		wireTrigger = "t",
-		usesSelectedSound = true,
-		detail = "Sound on party target",
-		percentLabel = "Chance",
+		sound = "wep_hello_there",
 	},
 	{
 		text = "Combat Drop",
@@ -113,9 +105,7 @@ local ACTIONS = {
 		wireAction = "trap",
 		trigger = "combat",
 		wireTrigger = "c",
-		usesSelectedSound = true,
-		detail = "Sound entering combat",
-		percentLabel = "Chance",
+		sound = "wep_fbi_open_up",
 	},
 	{
 		text = "Cast Heckle",
@@ -123,19 +113,15 @@ local ACTIONS = {
 		wireAction = "trap",
 		trigger = "cast",
 		wireTrigger = "s",
-		usesSelectedSound = true,
-		detail = "Sound when casting",
-		percentLabel = "Chance",
+		sound = "wep_error",
 	},
 	{
-		text = "Low Health Panic",
+		text = "Enemy Sting",
 		action = "sound_trap",
 		wireAction = "trap",
-		trigger = "low_health",
-		wireTrigger = "h",
-		usesSelectedSound = true,
-		detail = "Sound below health %",
-		percentLabel = "Health %",
+		trigger = "enemy_target",
+		wireTrigger = "e",
+		sound = "wep_nani",
 	},
 }
 
@@ -151,7 +137,7 @@ local actionLabels = {
 local trapLabels = {
 	cast = "Cast Heckle",
 	combat = "Combat Drop",
-	low_health = "Low Health Panic",
+	enemy_target = "Enemy Sting",
 	target = "Target Sting",
 	walk = "Boom Walk",
 }
@@ -292,8 +278,8 @@ local function normalizeTrapTrigger(trigger)
 		return "cast"
 	end
 
-	if normalized == "h" then
-		return "low_health"
+	if normalized == "e" then
+		return "enemy_target"
 	end
 
 	if normalized == "move" or normalized == "movement" or normalized == "walking" then
@@ -308,8 +294,8 @@ local function normalizeTrapTrigger(trigger)
 		return "cast"
 	end
 
-	if normalized == "health" or normalized == "lowhealth" or normalized == "low_health_panic" then
-		return "low_health"
+	if normalized == "enemy" or normalized == "hostile" or normalized == "hostile_target" then
+		return "enemy_target"
 	end
 
 	if trapLabels[normalized] then
@@ -485,69 +471,6 @@ function PartyInterference:GetSelectedAction()
 	return ACTIONS[selectedIndex], selectedIndex
 end
 
-function PartyInterference:GetSoundOptions()
-	if Sound and Sound.GetCustomSounds then
-		local sounds = Sound.GetCustomSounds()
-
-		if #sounds > 0 then
-			return sounds
-		end
-	end
-
-	return {
-		{
-			name = DEFAULT_SOUND,
-			label = "WEP Alert",
-		},
-	}
-end
-
-function PartyInterference:GetSelectedSound()
-	local sounds = self:GetSoundOptions()
-	local selectedIndex = tonumber(self.selectedSoundIndex) or 1
-
-	if selectedIndex < 1 then
-		selectedIndex = 1
-	end
-
-	if selectedIndex > #sounds then
-		selectedIndex = #sounds
-	end
-
-	self.selectedSoundIndex = selectedIndex
-	return sounds[selectedIndex], selectedIndex, #sounds
-end
-
-function PartyInterference:GetSelectedSoundName()
-	local sound = self:GetSelectedSound()
-	return sound and sound.name or DEFAULT_SOUND
-end
-
-function PartyInterference:SelectSoundOffset(offset)
-	local sounds = self:GetSoundOptions()
-	local selectedIndex = tonumber(self.selectedSoundIndex) or 1
-
-	if #sounds == 0 then
-		return false
-	end
-
-	selectedIndex = selectedIndex + (tonumber(offset) or 0)
-
-	if selectedIndex < 1 then
-		selectedIndex = #sounds
-	elseif selectedIndex > #sounds then
-		selectedIndex = 1
-	end
-
-	self.selectedSoundIndex = selectedIndex
-	WEP:Log("PartyInterference", "sound_selected", {
-		index = selectedIndex,
-		sound = sounds[selectedIndex] and sounds[selectedIndex].name or "none",
-	})
-	self:RefreshWindow()
-	return true
-end
-
 function PartyInterference:GetPercentLabel()
 	local actionConfig = self:GetSelectedAction()
 	return actionConfig and actionConfig.percentLabel or "Percent"
@@ -622,10 +545,13 @@ function PartyInterference:SendAction(actionConfig)
 		t = shortName(target),
 		a = actionConfig.wireAction or actionConfig.action,
 		d = self.durationSeconds,
-		i = self.percent,
 		n = self.includeSender and "1" or "0",
 		id = self:MakeEffectId(),
 	}
+
+	if actionConfig.usesPercent then
+		payload.i = self.percent
+	end
 
 	if not isBlank(self.customMessage) then
 		payload.m = self.customMessage
@@ -635,9 +561,7 @@ function PartyInterference:SendAction(actionConfig)
 		payload.g = actionConfig.group
 	end
 
-	if actionConfig.usesSelectedSound then
-		payload.s = self:GetSelectedSoundName()
-	elseif actionConfig.sound then
+	if actionConfig.sound then
 		payload.s = actionConfig.sound
 	end
 
@@ -736,7 +660,7 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 	end
 
 	if action == "sound_trap" or action == "trap" then
-		local percent = getPayloadNumber(payload, "i", MIN_PERCENT, MAX_PERCENT, DEFAULT_PERCENT)
+		local chance = getPayloadNumber(payload, "i", 0, 100, 100)
 
 		return Interference.Apply({
 			id = self:MakeIncomingEffectId(message, payload),
@@ -745,8 +669,7 @@ function PartyInterference:ApplyIncomingAction(message, payload)
 			duration = getPayloadNumber(payload, "d", MIN_DURATION_SECONDS, MAX_DURATION_SECONDS, DEFAULT_DURATION_SECONDS),
 			trigger = normalizeTrapTrigger(payload.k) or tostring(payload.k or ""),
 			sound = isBlank(payload.s) and DEFAULT_SOUND or tostring(payload.s),
-			chance = percent,
-			threshold = percent,
+			chance = chance,
 		})
 	end
 
@@ -838,7 +761,6 @@ function PartyInterference:RefreshActionRows()
 		local selected = index == selectedIndex
 
 		row.name:SetText(actionConfig.text)
-		row.detail:SetText(actionConfig.detail or "")
 
 		if selected then
 			setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
@@ -905,10 +827,10 @@ function PartyInterference:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPPartyInterferenceWindow",
 		title = "Party Interference",
-		width = 420,
-		height = 560,
-		minWidth = 400,
-		minHeight = 520,
+		width = 470,
+		height = 500,
+		minWidth = 440,
+		minHeight = 470,
 		resizable = true,
 		onShow = function()
 			self:RefreshWindow()
@@ -985,65 +907,42 @@ function PartyInterference:EnsureWindow()
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
 	window.senderCheckLabel:SetText("Include sender name")
 
-	window.soundTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.soundTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -8)
-	window.soundTitle:SetText("Sound")
-
-	window.soundPrevButton = Form.CreateButton(content, {
-		text = "<",
-		width = 28,
-		onClick = function()
-			self:SelectSoundOffset(-1)
-		end,
-	})
-	window.soundPrevButton:SetPoint("TOPLEFT", window.soundTitle, "BOTTOMLEFT", 0, -4)
-
-	window.soundText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	window.soundText:SetPoint("LEFT", window.soundPrevButton, "RIGHT", 8, 0)
-	window.soundText:SetWidth(220)
-	window.soundText:SetJustifyH("LEFT")
-
-	window.soundNextButton = Form.CreateButton(content, {
-		text = ">",
-		width = 28,
-		onClick = function()
-			self:SelectSoundOffset(1)
-		end,
-	})
-	window.soundNextButton:SetPoint("LEFT", window.soundText, "RIGHT", 8, 0)
-
 	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.soundPrevButton, "BOTTOMLEFT", 0, -8)
+	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -10)
 	window.actionTitle:SetText("Effect")
 
 	window.actionFrame = CreateFrame("Frame", nil, content)
 	window.actionFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -6)
-	window.actionFrame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
-	window.actionFrame:SetHeight(#ACTIONS * ACTION_ROW_HEIGHT)
+	window.actionFrame:SetSize(
+		(ACTION_COLUMN_WIDTH * ACTION_COLUMNS) + (ACTION_COLUMN_GAP * (ACTION_COLUMNS - 1)),
+		math.ceil(#ACTIONS / ACTION_COLUMNS) * ACTION_ROW_HEIGHT
+	)
 
 	window.actionRows = {}
 
 	for index, actionConfig in ipairs(ACTIONS) do
 		local row = CreateFrame("Button", nil, window.actionFrame)
+		local rowIndex = math.floor((index - 1) / ACTION_COLUMNS)
+		local columnIndex = (index - 1) % ACTION_COLUMNS
+
+		row:SetWidth(ACTION_COLUMN_WIDTH)
 		row:SetHeight(ACTION_ROW_HEIGHT)
-		row:SetPoint("LEFT", window.actionFrame, "LEFT", 0, 0)
-		row:SetPoint("RIGHT", window.actionFrame, "RIGHT", 0, 0)
-		row:SetPoint("TOP", window.actionFrame, "TOP", 0, -((index - 1) * ACTION_ROW_HEIGHT))
+		row:SetPoint(
+			"TOPLEFT",
+			window.actionFrame,
+			"TOPLEFT",
+			columnIndex * (ACTION_COLUMN_WIDTH + ACTION_COLUMN_GAP),
+			-(rowIndex * ACTION_ROW_HEIGHT)
+		)
 
 		row.background = row:CreateTexture(nil, "BACKGROUND")
 		row.background:SetAllPoints(row)
 
 		row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 		row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
-		row.name:SetWidth(142)
+		row.name:SetPoint("RIGHT", row, "RIGHT", -8, 0)
 		row.name:SetJustifyH("LEFT")
 		row.name:SetText(actionConfig.text)
-
-		row.detail = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-		row.detail:SetPoint("LEFT", row.name, "RIGHT", 12, 0)
-		row.detail:SetPoint("RIGHT", row, "RIGHT", -8, 0)
-		row.detail:SetJustifyH("LEFT")
-		row.detail:SetText(actionConfig.detail or "")
 
 		row:SetScript("OnClick", function()
 			self:SelectAction(index)
@@ -1098,8 +997,7 @@ function PartyInterference:RefreshWindow(statusText)
 	local hasTarget = selectedTarget ~= nil
 	local activeCount = Interference.GetStatus().activeCount
 	local actionConfig = self:GetSelectedAction()
-	local selectedSound, selectedSoundIndex, soundCount = self:GetSelectedSound()
-	local soundSelectorEnabled = actionConfig and actionConfig.usesSelectedSound == true
+	local usesPercent = actionConfig and actionConfig.usesPercent == true
 
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
 	window.selectedText:SetText("Selected: " .. (selectedTarget and shortName(selectedTarget) or "none"))
@@ -1114,21 +1012,22 @@ function PartyInterference:RefreshWindow(statusText)
 		window.percentInput.label:SetText(self:GetPercentLabel())
 	end
 
-	if window.senderCheck then
-		window.senderCheck:SetChecked(self.includeSender ~= false)
+	if window.percentInput then
+		if usesPercent then
+			window.percentInput:Show()
+			window.percentInput:SetEnabled(true)
+		else
+			window.percentInput:Hide()
+		end
 	end
 
-	if window.soundText then
-		local soundLabel = selectedSound and (selectedSound.label or selectedSound.name) or DEFAULT_SOUND
-		window.soundText:SetText(soundLabel .. " (" .. selectedSoundIndex .. "/" .. soundCount .. ")")
-		window.soundText:SetTextColor(soundSelectorEnabled and 1 or 0.55, soundSelectorEnabled and 0.82 or 0.55, 0.2)
+	if window.senderCheck then
+		window.senderCheck:SetChecked(self.includeSender ~= false)
 	end
 
 	setButtonEnabled(window.startButton, hasTarget)
 	setButtonEnabled(window.clearButton, hasTarget)
 	setButtonEnabled(window.refreshButton, true)
-	setButtonEnabled(window.soundPrevButton, soundSelectorEnabled and soundCount > 1)
-	setButtonEnabled(window.soundNextButton, soundSelectorEnabled and soundCount > 1)
 end
 
 function PartyInterference:ShowWindow()
