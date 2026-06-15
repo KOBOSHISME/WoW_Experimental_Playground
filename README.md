@@ -111,9 +111,26 @@ Sound Events plays local custom sounds when built-in triggers happen. Open it wi
 /wep soundevents
 ```
 
-The panel lists each trigger with an on/off checkbox and a Test button for its sound. Trigger toggles persist in `WEPDB.soundEvents.triggers`.
+The panel lists each trigger with an on/off checkbox and a Test button for its sound. The list scrolls now, because the soundboard has grown a bit. Trigger toggles persist in `WEPDB.soundEvents.triggers`.
 
-Current triggers are Warrior Charge, which plays Deja Vu when your warrior or a party warrior successfully casts Charge, and Dungeon Entry, which plays Okay Lets Go when you enter a dungeon instance. Dungeon Entry ignores raids and battlegrounds and stays quiet when reloading while already inside a dungeon.
+Current built-in triggers:
+
+- Warrior Charge -> Deja Vu when your warrior or a party warrior casts Charge.
+- Dungeon Entry -> Okay Lets Go when you enter a dungeon instance.
+- Divine Shield -> Heavenly Music when your paladin or a party paladin casts Divine Shield.
+- Mind Control -> Among Us when your priest or a party priest casts Mind Control.
+- Feign Death -> Ack when your hunter or a party hunter casts Feign Death.
+- You Die -> Auughhh when your character dies.
+- Party Death -> Faaah when a party member dies.
+- Hard Crowd Control -> Error when you are stunned, feared, or silenced by common Classic control effects.
+- Party Join -> Hello There when a new party member joins.
+- Party Leader -> Among Us when the party leader changes.
+- Falling Damage -> Vine Boom when you take falling damage.
+- Rested Area -> Hub Intro when you enter a rested area or inn.
+- Level Up -> Anime Wow when you level up.
+- Rare Loot -> Rizz when you loot a rare, epic, or better item.
+
+Dungeon Entry ignores raids and battlegrounds. Dungeon, rested, party roster, and party leader state are primed on reload/login so the addon does not shout at you just for loading in.
 
 ## Tool Debug Commands
 
