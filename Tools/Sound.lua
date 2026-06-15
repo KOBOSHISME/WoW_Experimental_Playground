@@ -178,6 +178,11 @@ local DEFAULT_CUSTOM_SOUNDS = {
 		label = "TF Nemesis",
 	},
 	{
+		name = "wep_under_the_water",
+		file = "under-the-water.mp3",
+		label = "Under the Water",
+	},
+	{
 		name = "wep_vine_boom",
 		file = "vine-boom.mp3",
 		label = "Vine Boom",

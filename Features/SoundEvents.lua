@@ -9,6 +9,7 @@ local SoundEvents = {
 	partyGuids = {},
 	partyLeaderGuid = nil,
 	hasSeenGroupState = false,
+	wasUnderwater = false,
 }
 
 WEP.SoundEvents = SoundEvents
@@ -40,9 +41,11 @@ local TRIGGER_FALLING_DAMAGE = "fallingDamage"
 local TRIGGER_RESTED_AREA = "restedArea"
 local TRIGGER_LEVEL_UP = "levelUp"
 local TRIGGER_RARE_LOOT = "rareLoot"
+local TRIGGER_UNDERWATER = "underwater"
 
 local DEFAULT_COOLDOWN_SECONDS = 2
 local STATE_CHECK_DELAY = 0.5
+local BREATH_TIMER_NAME = "BREATH"
 local ROW_HEIGHT = 46
 local WINDOW_WIDTH = 560
 local WINDOW_HEIGHT = 430
@@ -315,6 +318,15 @@ local TRIGGERS = {
 		cooldown = DEFAULT_COOLDOWN_SECONDS,
 		rareLoot = true,
 	},
+	{
+		id = TRIGGER_UNDERWATER,
+		title = "Underwater",
+		description = "You start diving underwater.",
+		sound = "wep_under_the_water",
+		soundLabel = "Under the Water",
+		defaultEnabled = true,
+		cooldown = DEFAULT_COOLDOWN_SECONDS,
+	},
 }
 
 local triggerById = {}
@@ -326,6 +338,10 @@ end
 
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
+end
+
+local function isBreathMirrorTimer(timerName)
+	return string.upper(tostring(timerName or "")) == BREATH_TIMER_NAME
 end
 
 local function getCheckedValue(checkButton)
@@ -832,6 +848,13 @@ function SoundEvents:RefreshRuntime()
 		events.CHAT_MSG_LOOT = true
 	end
 
+	if self:IsTriggerEnabled(TRIGGER_UNDERWATER) then
+		events.MIRROR_TIMER_START = true
+		events.MIRROR_TIMER_STOP = true
+	else
+		self.wasUnderwater = false
+	end
+
 	for event in pairs(events) do
 		registerEvent(frame, event)
 	end
@@ -841,6 +864,7 @@ function SoundEvents:RefreshRuntime()
 		dungeon = self:IsTriggerEnabled(TRIGGER_DUNGEON),
 		group = self:AreGroupTriggersEnabled(),
 		rested = self:IsTriggerEnabled(TRIGGER_RESTED_AREA),
+		underwater = self:IsTriggerEnabled(TRIGGER_UNDERWATER),
 	})
 end
 
@@ -1136,6 +1160,24 @@ function SoundEvents:OnLootMessage(text)
 	end
 end
 
+function SoundEvents:HandleMirrorTimer(event, timerName)
+	if not self:IsTriggerEnabled(TRIGGER_UNDERWATER) or not isBreathMirrorTimer(timerName) then
+		return
+	end
+
+	if event == "MIRROR_TIMER_STOP" then
+		self.wasUnderwater = false
+		return
+	end
+
+	if self.wasUnderwater then
+		return
+	end
+
+	self.wasUnderwater = true
+	self:PlayTrigger(TRIGGER_UNDERWATER, "breath_timer_start")
+end
+
 function SoundEvents:OnEvent(event, ...)
 	if event == "COMBAT_LOG_EVENT_UNFILTERED" then
 		self:OnCombatLogEvent(...)
@@ -1192,6 +1234,11 @@ function SoundEvents:OnEvent(event, ...)
 
 	if event == "CHAT_MSG_LOOT" then
 		self:OnLootMessage(...)
+		return
+	end
+
+	if event == "MIRROR_TIMER_START" or event == "MIRROR_TIMER_STOP" then
+		self:HandleMirrorTimer(event, ...)
 	end
 end
 
