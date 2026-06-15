@@ -39,8 +39,7 @@ local DEFAULT_PERCENT = 70
 local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
-local EFFECT_LIST_MIN_ROWS = 3
-local EFFECT_LIST_BASE_HEIGHT = 242
+local ACTION_ROW_HEIGHT = 22
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -240,13 +239,8 @@ local function ensureScreenNoticeFrame()
 	frame:EnableMouse(false)
 	frame:Hide()
 
-	frame.background = frame:CreateTexture(nil, "BACKGROUND")
-	frame.background:SetPoint("CENTER", frame, "CENTER", 0, 150)
-	frame.background:SetSize(660, 88)
-	setSolidColor(frame.background, 0, 0, 0, 0.62)
-
 	frame.text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
-	frame.text:SetPoint("CENTER", frame.background, "CENTER", 0, 0)
+	frame.text:SetPoint("CENTER", frame, "CENTER", 0, 150)
 	frame.text:SetWidth(620)
 	frame.text:SetJustifyH("CENTER")
 	frame.text:SetJustifyV("MIDDLE")
@@ -393,31 +387,6 @@ function PartyInterference:SelectAction(index)
 	})
 	self:RefreshWindow()
 	return true
-end
-
-function PartyInterference:GetActionItems()
-	local items = {}
-	local _, selectedIndex = self:GetSelectedAction()
-
-	for index, actionConfig in ipairs(ACTIONS) do
-		local selected = index == selectedIndex
-
-		items[#items + 1] = {
-			effect = actionConfig.text,
-			detail = actionConfig.detail or "",
-			color = selected and {
-				r = 0.15,
-				g = 0.45,
-				b = 0.25,
-				a = 0.45,
-			} or nil,
-			onClick = function()
-				self:SelectAction(index)
-			end,
-		}
-	end
-
-	return items
 end
 
 function PartyInterference:ReadWindowSettings()
@@ -646,20 +615,27 @@ function PartyInterference:PrintIncomingNotice(message, payload, result)
 	self:ShowScreenNotice(notice)
 end
 
-function PartyInterference:UpdateEffectRows()
+function PartyInterference:RefreshActionRows()
 	local window = interferenceWindow
-	if not window or not window.effectList or not window.frame or (window.IsCollapsed and window:IsCollapsed()) then
+	if not window or not window.actionRows then
 		return
 	end
 
-	local height = window.frame.GetHeight and window.frame:GetHeight() or 0
-	local visibleRows = math.floor((height - EFFECT_LIST_BASE_HEIGHT) / window.effectList.rowHeight)
+	local _, selectedIndex = self:GetSelectedAction()
 
-	if visibleRows < EFFECT_LIST_MIN_ROWS then
-		visibleRows = EFFECT_LIST_MIN_ROWS
+	for index, row in ipairs(window.actionRows) do
+		local actionConfig = ACTIONS[index]
+		local selected = index == selectedIndex
+
+		row.name:SetText(actionConfig.text)
+		row.detail:SetText(actionConfig.detail or "")
+
+		if selected then
+			setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
+		else
+			setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.12 or 0.04)
+		end
 	end
-
-	window.effectList:SetVisibleRows(visibleRows)
 end
 
 function PartyInterference:OnActionMessage(message)
@@ -719,16 +695,13 @@ function PartyInterference:EnsureWindow()
 	local window, err = WindowTool.Create({
 		name = "WEPPartyInterferenceWindow",
 		title = "Party Interference",
-		width = 450,
-		height = 390,
+		width = 400,
+		height = 430,
 		minWidth = 380,
-		minHeight = 330,
+		minHeight = 420,
 		resizable = true,
 		onShow = function()
 			self:RefreshWindow()
-		end,
-		onResize = function()
-			self:UpdateEffectRows()
 		end,
 	})
 
@@ -753,18 +726,18 @@ function PartyInterference:EnsureWindow()
 	window.selectedText:SetJustifyH("LEFT")
 
 	window.partyList = List.Create(content, {
-		width = 180,
-		visibleRows = 3,
+		width = 150,
+		visibleRows = 2,
 		rowHeight = 24,
 		emptyText = "No party members.",
 		columns = {
 			{
 				key = "name",
-				width = 98,
+				width = 86,
 			},
 			{
 				key = "state",
-				width = 54,
+				width = 42,
 			},
 		},
 	})
@@ -774,7 +747,7 @@ function PartyInterference:EnsureWindow()
 		label = "Duration",
 		value = self.durationSeconds,
 		numeric = true,
-		width = 78,
+		width = 72,
 	})
 	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 16, 0)
 
@@ -782,14 +755,14 @@ function PartyInterference:EnsureWindow()
 		label = "Percent",
 		value = self.percent,
 		numeric = true,
-		width = 78,
+		width = 72,
 	})
 	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 12, 0)
 
 	window.messageInput = Form.CreateInput(content, {
 		label = "Message",
 		value = self.customMessage,
-		width = 168,
+		width = 156,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
 	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -8)
@@ -802,24 +775,45 @@ function PartyInterference:EnsureWindow()
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
 	window.senderCheckLabel:SetText("Include sender name")
 
-	window.effectList = List.Create(content, {
-		width = 398,
-		visibleRows = 6,
-		rowHeight = 24,
-		emptyText = "No effects.",
-		columns = {
-			{
-				key = "effect",
-				width = 150,
-			},
-			{
-				key = "detail",
-				width = 200,
-			},
-		},
-	})
-	window.effectList.frame:SetPoint("TOPLEFT", window.partyList.frame, "BOTTOMLEFT", 0, -10)
-	window.effectList.frame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -6)
+	window.actionTitle:SetText("Effect")
+
+	window.actionFrame = CreateFrame("Frame", nil, content)
+	window.actionFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -6)
+	window.actionFrame:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+	window.actionFrame:SetHeight(#ACTIONS * ACTION_ROW_HEIGHT)
+
+	window.actionRows = {}
+
+	for index, actionConfig in ipairs(ACTIONS) do
+		local row = CreateFrame("Button", nil, window.actionFrame)
+		row:SetHeight(ACTION_ROW_HEIGHT)
+		row:SetPoint("LEFT", window.actionFrame, "LEFT", 0, 0)
+		row:SetPoint("RIGHT", window.actionFrame, "RIGHT", 0, 0)
+		row:SetPoint("TOP", window.actionFrame, "TOP", 0, -((index - 1) * ACTION_ROW_HEIGHT))
+
+		row.background = row:CreateTexture(nil, "BACKGROUND")
+		row.background:SetAllPoints(row)
+
+		row.name = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		row.name:SetPoint("LEFT", row, "LEFT", 8, 0)
+		row.name:SetWidth(142)
+		row.name:SetJustifyH("LEFT")
+		row.name:SetText(actionConfig.text)
+
+		row.detail = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+		row.detail:SetPoint("LEFT", row.name, "RIGHT", 12, 0)
+		row.detail:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+		row.detail:SetJustifyH("LEFT")
+		row.detail:SetText(actionConfig.detail or "")
+
+		row:SetScript("OnClick", function()
+			self:SelectAction(index)
+		end)
+
+		window.actionRows[index] = row
+	end
 
 	window.startButton = Form.CreateButton(window.footer, {
 		text = "Start",
@@ -849,7 +843,7 @@ function PartyInterference:EnsureWindow()
 	window.refreshButton:SetPoint("LEFT", window.clearButton, "RIGHT", 8, 0)
 
 	interferenceWindow = window
-	self:UpdateEffectRows()
+	self:RefreshActionRows()
 	WEP:Log("PartyInterference", "window_created")
 	return interferenceWindow
 end
@@ -870,8 +864,7 @@ function PartyInterference:RefreshWindow(statusText)
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
 	window.selectedText:SetText("Selected: " .. (selectedTarget and shortName(selectedTarget) or "none"))
 	window.partyList:SetItems(self:GetPartyItems())
-	self:UpdateEffectRows()
-	window.effectList:SetItems(self:GetActionItems())
+	self:RefreshActionRows()
 
 	setInputValueIfNotFocused(window.durationInput, self.durationSeconds)
 	setInputValueIfNotFocused(window.percentInput, self.percent)

@@ -91,7 +91,7 @@ Party Interference is a small party-only prank feature. Open it with:
 /wep prank
 ```
 
-The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration and percent value, optionally add a short custom message, choose whether to include your sender name, select one of the vertical effect rows, then press Start. Core interference actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent.
+The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration and percent value, optionally add a short custom message, choose whether to include your sender name, select an effect from the compact action list, then press Start. Core interference actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent.
 
 Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-30 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
 
