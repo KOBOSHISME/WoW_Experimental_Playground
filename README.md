@@ -1,23 +1,26 @@
 # WoW Experimental Playground
 
-A World of Warcraft Classic addon playground for experimental features, challenges, roleplay tools, and whatever strange little ideas are worth trying next.
+A small World of Warcraft Classic addon playground for trying features, challenges, roleplay tools, sound moments, and whatever addon ideas seem worth poking at next.
 
-This project is intentionally open-ended. Some features may become polished addon modules, while others may stay as prototypes or one-off experiments.
+The point is to keep experiments easy to try, easy to turn off, and easy to remove when they have served their purpose. Some ideas may grow into polished modules. Others can stay as little prototypes.
 
-## Goals
+## What This Is For
 
-- Build playful and useful WoW Classic addon experiments.
+- Build playful, useful WoW Classic addon experiments.
 - Try challenge modes, roleplay helpers, UI ideas, quality-of-life tools, and social features.
-- Keep experiments modular so unfinished ideas do not block stable ones.
-- Document decisions as the addon grows.
+- Keep features modular so unfinished ideas do not get in the way of stable ones.
+- Leave enough notes that the next pass through the code is not archaeology.
 
-## Status
+## Current Shape
 
-Early scaffold with a v1 hidden addon communication bus.
+The addon has a small core, shared tools, a hidden addon communication layer, and a few feature modules:
 
-## Planned Addon Shape
+- Hide and Seek, an addon-managed challenge mode.
+- Party Interference, a party-only prank/control panel.
+- Sound Events, local sound triggers for casts and world events.
+- Tool Debug, a grab bag for testing shared tools in-game.
 
-The addon will likely start with a small core and feature folders:
+The source is laid out like this:
 
 ```text
 WoW_Experimental_Playground/
@@ -29,14 +32,16 @@ WoW_Experimental_Playground/
   Features/
 ```
 
-This may change as the project finds its direction.
+That shape can change as the playground grows, but new features should still stay easy to find.
 
-## Architecture
+## How Code Is Organized
 
+- `Core.lua` owns the addon namespace, saved defaults, module initialization, logging, and feature registry.
 - `Utils/` contains pure helpers that do not call WoW APIs.
-- `Tools/` contains reusable WoW-facing services such as timers, player identity, and chat-channel helpers.
+- `Tools/` contains reusable WoW-facing services such as timers, sounds, player identity, environment snapshots, and UI helpers.
 - `Comm/` owns addon communication protocol and transport behavior.
 - `Features/` contains player-facing experiments and feature modules.
+- `Sounds/Custom/` contains addon-local custom sounds registered by `WEP.Tools.Sound`.
 
 ## Communication Diagnostics
 
@@ -284,9 +289,9 @@ World of Warcraft\_classic_era_\Interface\AddOns\WoW_Experimental_Playground
 ## Development Notes
 
 - Target WoW Classic first.
-- Keep experimental features isolated where possible.
+- Keep experimental features isolated where practical.
 - Avoid relying on other addons unless a feature explicitly integrates with one.
 - Hidden addon channels are for coordination, not security. Treat received payloads as untrusted.
-- Run `luac51 -p Core.lua Utils\*.lua Tools\*.lua Comm\*.lua Features\*.lua` for Lua syntax checks.
-- Run `luacheck Core.lua Utils\*.lua Tools\*.lua Comm\*.lua Features\*.lua` with WoW globals allowed for linting.
-- Update this README as actual features, commands, and install details are added.
+- Run `luac51 -p Core.lua Utils\*.lua Tools\*.lua Comm\*.lua Features\*.lua` from this folder for Lua syntax checks.
+- Run `luacheck Core.lua Utils\*.lua Tools\*.lua Comm\*.lua Features\*.lua` with WoW globals allowed when linting is available.
+- Update this README when features, commands, sounds, install details, or workflow notes change.
