@@ -61,6 +61,129 @@ local DEFAULT_GAME_SOUNDS = {
 	},
 }
 
+local DEFAULT_CUSTOM_SOUNDS = {
+	{
+		name = "wep_alert",
+		file = "wep-alert.wav",
+		label = "WEP Alert",
+	},
+	{
+		name = "wep_ack",
+		file = "ack.mp3",
+		label = "Ack",
+	},
+	{
+		name = "wep_among_us",
+		file = "among-us-role-reveal.mp3",
+		label = "Among Us",
+	},
+	{
+		name = "wep_anime_wow",
+		file = "anime-wow.mp3",
+		label = "Anime Wow",
+	},
+	{
+		name = "wep_another_one",
+		file = "another-one.mp3",
+		label = "Another One",
+	},
+	{
+		name = "wep_auughhh",
+		file = "auughhh.mp3",
+		label = "Auughhh",
+	},
+	{
+		name = "wep_deja_vu",
+		file = "deja-vu.mp3",
+		label = "Deja Vu",
+	},
+	{
+		name = "wep_ding",
+		file = "ding.mp3",
+		label = "Ding",
+	},
+	{
+		name = "wep_dun_dun_dun",
+		file = "dun-dun-dun.mp3",
+		label = "Dun Dun Dun",
+	},
+	{
+		name = "wep_error",
+		file = "error.mp3",
+		label = "Error",
+	},
+	{
+		name = "wep_faaah",
+		file = "faaah.mp3",
+		label = "Faaah",
+	},
+	{
+		name = "wep_fbi_open_up",
+		file = "fbi-open-up.mp3",
+		label = "FBI Open Up",
+	},
+	{
+		name = "wep_heavenly_music",
+		file = "heavenly-music.mp3",
+		label = "Heavenly Music",
+	},
+	{
+		name = "wep_hub_intro",
+		file = "hub-intro.mp3",
+		label = "Hub Intro",
+	},
+	{
+		name = "wep_i_got_you_homie",
+		file = "i-got-you-homie.mp3",
+		label = "I Got You Homie",
+	},
+	{
+		name = "wep_mlg_airhorn",
+		file = "mlg-airhorn.mp3",
+		label = "MLG Airhorn",
+	},
+	{
+		name = "wep_nani",
+		file = "nani.mp3",
+		label = "Nani",
+	},
+	{
+		name = "wep_hello_there",
+		file = "hello-there.mp3",
+		label = "Hello There",
+	},
+	{
+		name = "wep_okay_lets_go",
+		file = "okay-lets-go.mp3",
+		label = "Okay Lets Go",
+	},
+	{
+		name = "wep_punch",
+		file = "punch.mp3",
+		label = "Punch",
+	},
+	{
+		name = "wep_rizz",
+		file = "rizz.mp3",
+		label = "Rizz",
+	},
+	{
+		name = "wep_spiderman",
+		file = "spiderman.mp3",
+		label = "Spiderman",
+	},
+	{
+		name = "wep_tf_nemesis",
+		file = "tf-nemesis.mp3",
+		label = "TF Nemesis",
+	},
+	{
+		name = "wep_vine_boom",
+		file = "vine-boom.mp3",
+		label = "Vine Boom",
+	},
+}
+
 local function isBlank(value)
 	return value == nil or tostring(value) == ""
 end
@@ -635,4 +758,6 @@ for name, sound in pairs(DEFAULT_GAME_SOUNDS) do
 	Sound.gameSounds[name].fallback = sound.fallback
 end
 
-Sound.RegisterCustom("wep_alert", "wep-alert.wav", "WEP Alert")
+for _, sound in ipairs(DEFAULT_CUSTOM_SOUNDS) do
+	Sound.RegisterCustom(sound.name, sound.file, sound.label)
+end

@@ -91,7 +91,9 @@ Party Interference is a small party-only prank feature. Open it with:
 /wep prank
 ```
 
-The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration and percent value, optionally add a short custom message, choose whether to include your sender name, select an effect from the compact action list, then press Start. Core interference actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent.
+The resizable window lists current `party1` through `party4` members. Select a party member, choose a bounded duration, optionally add a short custom message, choose whether to include your sender name, select an effect from the compact action list, then press Start. The percent field changes meaning by effect: blackout uses it as intensity, sound traps use it as chance, and Low Health Panic uses it as the health threshold.
+
+Core interference actions can darken their screen, hide unit frames/health, hide action bars, hide the minimap, hide chat, play the WEP alert sound, or clear effects that you sent. Sound-trap actions use the selected custom sound as a trigger response: Boom Walk plays while the target moves, Target Sting plays when they target a party member, Combat Drop plays when they enter combat, Cast Heckle plays when they start casting, and Low Health Panic plays when they cross below the selected health percentage.
 
 Incoming actions auto-apply only when the sender is currently in your party and the target matches your character. Prank notices are printed to chat and shown briefly on screen. Durations are clamped to 1-30 seconds, percent is clamped to 10-95%, custom messages are capped at 60 characters, and UI hides are owner-tracked so temporary interference does not restore UI that another feature, such as Hide and Seek, is still hiding.
 
@@ -111,6 +113,7 @@ Reusable tools can be tested from chat with:
 /wep tools sound play ui_select duration=1
 /wep tools sound play game:852 channel=sfx
 /wep tools sound play wep_alert duration=1
+/wep tools sound play wep_vine_boom duration=1
 /wep tools sound play custom:wep-alert.wav duration=1
 /wep tools sound status
 /wep tools overlay blackout 50
@@ -205,9 +208,12 @@ The window helper owns frame chrome and movable panel behavior. The form helper 
 WEP.Tools.Sound.Play("ui_select")
 WEP.Tools.Sound.Play("game:852", { channel = "SFX", duration = 1 })
 WEP.Tools.Sound.Play("wep_alert", { duration = 1 })
+WEP.Tools.Sound.Play("wep_vine_boom")
 WEP.Tools.Sound.Play("custom:wep-alert.wav", { duration = 1 })
 WEP.Tools.Sound.PlayCustom("wep-alert.wav")
 ```
+
+Party Interference registers a set of short `wep_*` custom sound IDs for sound traps. Use `/wep tools sound list` to print the current registered names.
 
 Supported options are:
 
