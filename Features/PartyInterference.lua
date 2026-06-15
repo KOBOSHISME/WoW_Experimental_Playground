@@ -27,6 +27,7 @@ local Party = WEP.Tools.Party
 local Interference = WEP.Tools.Interference
 local Timer = WEP.Tools.Timer
 local UIVisibility = WEP.Tools.UIVisibility
+local SoundTriggers = WEP.Tools.SoundTriggers
 local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
 local List = WEP.Tools.List
@@ -295,53 +296,11 @@ local function normalizeGroup(group)
 end
 
 local function normalizeTrapTrigger(trigger)
-	if isBlank(trigger) then
+	if not SoundTriggers or not SoundTriggers.NormalizeTrigger then
 		return nil
 	end
 
-	local normalized = string.lower(tostring(trigger)):gsub("[%s_-]+", "_")
-
-	if normalized == "w" then
-		return "walk"
-	end
-
-	if normalized == "t" then
-		return "target"
-	end
-
-	if normalized == "c" then
-		return "combat"
-	end
-
-	if normalized == "s" then
-		return "cast"
-	end
-
-	if normalized == "e" then
-		return "enemy_target"
-	end
-
-	if normalized == "move" or normalized == "movement" or normalized == "walking" then
-		return "walk"
-	end
-
-	if normalized == "party_target" or normalized == "target_party" then
-		return "target"
-	end
-
-	if normalized == "spellcast" or normalized == "spell_cast" then
-		return "cast"
-	end
-
-	if normalized == "enemy" or normalized == "hostile" or normalized == "hostile_target" then
-		return "enemy_target"
-	end
-
-	if trapLabels[normalized] then
-		return normalized
-	end
-
-	return nil
+	return SoundTriggers.NormalizeTrigger(trigger)
 end
 
 local function getPayloadNumber(payload, key, minValue, maxValue, defaultValue)

@@ -14,6 +14,7 @@ Tools\Player.lua
 Tools\Party.lua
 Tools\ChatChannels.lua
 Tools\Sound.lua
+Tools\SoundTriggers.lua
 Tools\ScreenOverlay.lua
 Tools\UIVisibility.lua
 Tools\Interference.lua
