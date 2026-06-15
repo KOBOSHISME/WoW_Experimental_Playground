@@ -268,26 +268,6 @@ local actionLabels = {
 	vignette = "Tunnel Vision",
 }
 
-local visualVariantLabels = {
-	arcane = "Arcane Haze",
-	error = "Error Storm",
-	fel = "Fel Goggles",
-	loot = "Loot Mirage",
-	panic = "Panic Flash",
-	raid = "Fake Raid Warning",
-	red = "Red Alert",
-	snow = "Snowblind",
-	tunnel = "Tunnel Vision",
-}
-
-local trapLabels = {
-	cast = "Cast Heckle",
-	combat = "Combat Drop",
-	enemy_target = "Enemy Sting",
-	target = "Target Sting",
-	walk = "Boom Walk",
-}
-
 local categoryLabels = {
 	sound_traps = "Sound Trap",
 	ui = "Hide UI",
@@ -918,18 +898,6 @@ function PartyInterference:BuildIncomingNotice(message, payload, result)
 	local customMessage = sanitizeMessage(payload and payload.m)
 	local includeSender = shouldShowSender(payload)
 	local senderName = shortName(message and message.sender or "unknown")
-	local action = payload and payload.a or ""
-	local actionText = actionLabels[action] or action or "Prank"
-	local trigger = normalizeTrapTrigger(payload and payload.k)
-	local variant = normalizeVariant(payload and payload.v)
-
-	if action == "sound_trap" or action == "trap" then
-		actionText = trigger and trapLabels[trigger] or actionText
-	end
-
-	if action == "tint" or action == "pulse" or action == "vignette" or action == "fake_notice" then
-		actionText = variant and visualVariantLabels[variant] or actionText
-	end
 
 	if customMessage ~= "" then
 		if includeSender then
@@ -939,19 +907,7 @@ function PartyInterference:BuildIncomingNotice(message, payload, result)
 		return customMessage
 	end
 
-	if action == "clear" then
-		if includeSender then
-			return "Pranks cleared by " .. senderName .. ". Effects: " .. tostring(result or 0)
-		end
-
-		return "Pranks cleared. Effects: " .. tostring(result or 0)
-	end
-
-	if includeSender then
-		return "Prank from " .. senderName .. ": " .. actionText
-	end
-
-	return "Prank: " .. actionText
+	return nil
 end
 
 function PartyInterference:ShowScreenNotice(text)

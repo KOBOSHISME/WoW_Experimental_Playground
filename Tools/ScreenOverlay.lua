@@ -316,14 +316,28 @@ local function ensureVignetteFrame()
 	frame:SetFrameLevel(DEFAULT_FRAME_LEVEL - 4)
 	frame:EnableMouse(false)
 
-	frame.vignette = frame:CreateTexture(nil, "ARTWORK")
-	frame.vignette:SetAllPoints(frame)
-	frame.vignette:SetTexture(DEFAULT_VIGNETTE_TEXTURE)
-	frame.vignette:SetVertexColor(0, 0, 0, 0)
+	frame.left = frame:CreateTexture(nil, "ARTWORK")
+	frame.left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+	frame.left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
 
-	if frame.vignette.SetBlendMode then
-		frame.vignette:SetBlendMode("BLEND")
-	end
+	frame.right = frame:CreateTexture(nil, "ARTWORK")
+	frame.right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+	frame.right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+
+	frame.top = frame:CreateTexture(nil, "ARTWORK")
+	frame.top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+	frame.top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+
+	frame.bottom = frame:CreateTexture(nil, "ARTWORK")
+	frame.bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+	frame.bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+
+	frame.edges = {
+		frame.left,
+		frame.right,
+		frame.top,
+		frame.bottom,
+	}
 
 	frame:Hide()
 	vignetteFrame = frame
@@ -516,13 +530,38 @@ local function applyVignette()
 	end
 
 	if not effect then
-		frame.vignette:SetVertexColor(0, 0, 0, 0)
+		for _, edge in ipairs(frame.edges or {}) do
+			setSolidColor(edge, 0, 0, 0, 0)
+		end
+
 		frame:Hide()
 		return true
 	end
 
 	local preset = getPreset(VIGNETTE_PRESETS, effect.preset, DEFAULT_VIGNETTE_PRESET)
-	frame.vignette:SetVertexColor(preset.r, preset.g, preset.b, getEffectAlpha(effect, preset))
+	local normalized = (effect.intensity or 0) / 100
+	local edgeWidth = math.floor(48 + (normalized * 280))
+	local edgeHeight = math.floor(36 + (normalized * 180))
+	local frameWidth = frame.GetWidth and frame:GetWidth() or 0
+	local frameHeight = frame.GetHeight and frame:GetHeight() or 0
+
+	if frameWidth > 0 then
+		edgeWidth = math.min(edgeWidth, math.floor(frameWidth * 0.36))
+	end
+
+	if frameHeight > 0 then
+		edgeHeight = math.min(edgeHeight, math.floor(frameHeight * 0.36))
+	end
+
+	frame.left:SetWidth(edgeWidth)
+	frame.right:SetWidth(edgeWidth)
+	frame.top:SetHeight(edgeHeight)
+	frame.bottom:SetHeight(edgeHeight)
+
+	for _, edge in ipairs(frame.edges or {}) do
+		setSolidColor(edge, preset.r, preset.g, preset.b, getEffectAlpha(effect, preset))
+	end
+
 	frame:Show()
 	return true
 end
