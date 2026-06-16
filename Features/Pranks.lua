@@ -6,7 +6,9 @@ local Pranks = {
 	customMessage = "",
 	includeSender = true,
 	selectedTarget = nil,
+	selectedTargets = {},
 	selectedActionIndex = 1,
+	selectedSound = "wep_alert",
 	counter = 0,
 }
 local PartyInterference = Pranks
@@ -24,6 +26,7 @@ local Party = WEP.Tools.Party
 local Interference = WEP.Tools.Interference
 local Timer = WEP.Tools.Timer
 local UIVisibility = WEP.Tools.UIVisibility
+local Sound = WEP.Tools.Sound
 local SoundTriggers = WEP.Tools.SoundTriggers
 local WindowTool = WEP.Tools.Window
 local Form = WEP.Tools.Form
@@ -202,10 +205,11 @@ local ACTIONS = {
 		group = "questtracker",
 	},
 	{
-		category = "sound_traps",
-		text = "Play Alert",
+		category = "sound",
+		text = "Play Sound",
 		action = "sound",
 		sound = DEFAULT_SOUND,
+		usesSoundSelection = true,
 	},
 	{
 		category = "sound_traps",
@@ -269,6 +273,7 @@ local actionLabels = {
 }
 
 local categoryLabels = {
+	sound = "Sound",
 	sound_traps = "Sound Trap",
 	ui = "Hide UI",
 	visual = "Visual",
@@ -296,7 +301,7 @@ local actionDescriptions = {
 	pulse = {
 		panic = "Pulses a red panic flash.",
 	},
-	sound = "Plays the WEP alert sound once.",
+	sound = "Plays the selected sound for the duration.",
 	sound_trap = {
 		cast = "Plays Error when they cast.",
 		combat = "Plays FBI Open Up in combat.",
@@ -556,63 +561,161 @@ function PartyInterference:GetPartyMembers()
 	return Party.GetMembers()
 end
 
-function PartyInterference:IsSelectedTargetInParty()
-	if isBlank(self.selectedTarget) then
-		return false
+function PartyInterference:EnsureSelectedTargets()
+	self.selectedTargets = self.selectedTargets or {}
+
+	if not isBlank(self.selectedTarget) then
+		local key = nameKey(self.selectedTarget)
+		if key ~= "" then
+			self.selectedTargets[key] = self.selectedTarget
+		end
+
+		self.selectedTarget = nil
+	end
+
+	return self.selectedTargets
+end
+
+function PartyInterference:FindPartyMember(target)
+	if isBlank(target) then
+		return nil
 	end
 
 	for _, member in ipairs(self:GetPartyMembers()) do
-		if namesMatch(member.name, self.selectedTarget) then
-			self.selectedTarget = member.name
-			return true
+		if namesMatch(member.name, target) or namesMatch(member.shortName, target) then
+			return member
 		end
-	end
-
-	return false
-end
-
-function PartyInterference:GetSelectedTarget()
-	if self:IsSelectedTargetInParty() then
-		return self.selectedTarget
 	end
 
 	return nil
 end
 
-function PartyInterference:SelectTarget(target)
-	if isBlank(target) then
-		return false
-	end
+function PartyInterference:GetSelectedTargets()
+	local selectedTargets = self:EnsureSelectedTargets()
+	local selected = {}
+	local currentKeys = {}
 
 	for _, member in ipairs(self:GetPartyMembers()) do
-		if namesMatch(member.name, target) or namesMatch(member.shortName, target) then
-			self.selectedTarget = member.name
-			WEP:Log("Pranks", "target_selected", {
-				target = self.selectedTarget,
-			})
-			self:RefreshWindow()
-			return true
+		local key = nameKey(member.name)
+
+		if key ~= "" then
+			currentKeys[key] = true
+
+			if selectedTargets[key] or selectedTargets[nameKey(member.shortName)] then
+				selectedTargets[key] = member.name
+				selected[#selected + 1] = member.name
+			end
 		end
 	end
 
-	WEP:Print("Prank target must be a current party member.")
-	WEP:Log("Pranks", "target_select_failed", {
-		target = target,
-		error = "not in party",
-	}, "warn")
-	return false
+	for key in pairs(selectedTargets) do
+		if not currentKeys[key] then
+			selectedTargets[key] = nil
+		end
+	end
+
+	return selected
 end
 
-function PartyInterference:GetPartyItems()
-	local items = {}
-	local selectedTarget = self:GetSelectedTarget()
+function PartyInterference:IsSelectedTargetInParty()
+	return self:GetSelectedTargets()[1] ~= nil
+end
+
+function PartyInterference:GetSelectedTarget()
+	return self:GetSelectedTargets()[1]
+end
+
+function PartyInterference:IsTargetSelected(target)
+	local key = nameKey(target)
+	return key ~= "" and self:EnsureSelectedTargets()[key] ~= nil
+end
+
+function PartyInterference:SetTargetSelected(target, selected)
+	local member = self:FindPartyMember(target)
+	if not member then
+		WEP:Print("Prank target must be a current party member.")
+		WEP:Log("Pranks", "target_select_failed", {
+			target = target,
+			error = "not in party",
+		}, "warn")
+		return false
+	end
+
+	local key = nameKey(member.name)
+	if selected == false then
+		self:EnsureSelectedTargets()[key] = nil
+	else
+		self:EnsureSelectedTargets()[key] = member.name
+	end
+
+	WEP:Log("Pranks", "target_selection_changed", {
+		target = member.name,
+		selected = selected ~= false,
+	})
+	self:RefreshWindow()
+	return true
+end
+
+function PartyInterference:SelectTarget(target)
+	return self:SetTargetSelected(target, not self:IsTargetSelected(target))
+end
+
+function PartyInterference:SelectAllTargets()
+	local selectedTargets = self:EnsureSelectedTargets()
 
 	for _, member in ipairs(self:GetPartyMembers()) do
-		local selected = selectedTarget and namesMatch(member.name, selectedTarget)
+		local key = nameKey(member.name)
+		if key ~= "" then
+			selectedTargets[key] = member.name
+		end
+	end
+
+	WEP:Log("Pranks", "targets_all_selected", {
+		count = #self:GetSelectedTargets(),
+	})
+	self:RefreshWindow()
+	return true
+end
+
+function PartyInterference:ClearSelectedTargets()
+	self.selectedTarget = nil
+	self.selectedTargets = {}
+	WEP:Log("Pranks", "targets_cleared")
+	self:RefreshWindow()
+	return true
+end
+
+function PartyInterference:GetSelectedTargetLabel(targets)
+	targets = targets or self:GetSelectedTargets()
+
+	if #targets == 0 then
+		return "none"
+	end
+
+	local names = {}
+	for _, target in ipairs(targets) do
+		names[#names + 1] = shortName(target)
+	end
+
+	return table.concat(names, ", ")
+end
+
+function PartyInterference:GetPartyItems(members)
+	local items = {}
+
+	for _, member in ipairs(members or self:GetPartyMembers()) do
+		local selected = self:IsTargetSelected(member.name)
+		local state = "Ready"
+
+		if selected then
+			state = "Picked"
+		elseif member.connected == false then
+			state = "Offline"
+		end
 
 		items[#items + 1] = {
 			name = member.shortName or shortName(member.name),
-			state = member.connected == false and "Offline" or "Ready",
+			state = state,
 			unit = member.unit,
 			color = selected and {
 				r = 0.15,
@@ -627,6 +730,97 @@ function PartyInterference:GetPartyItems()
 	end
 
 	return items
+end
+
+function PartyInterference:GetSoundChoices()
+	local choices = {}
+
+	if Sound and Sound.GetCustomSounds then
+		for _, sound in ipairs(Sound.GetCustomSounds()) do
+			choices[#choices + 1] = {
+				name = sound.name,
+				label = sound.label or sound.name,
+			}
+		end
+	end
+
+	if #choices == 0 then
+		choices[#choices + 1] = {
+			name = DEFAULT_SOUND,
+			label = "WEP Alert",
+		}
+	end
+
+	table.sort(choices, function(left, right)
+		return string.lower(left.label or left.name) < string.lower(right.label or right.name)
+	end)
+
+	return choices
+end
+
+function PartyInterference:GetSelectedSound()
+	local choices = self:GetSoundChoices()
+	local selectedSound = isBlank(self.selectedSound) and DEFAULT_SOUND or tostring(self.selectedSound)
+
+	for index, sound in ipairs(choices) do
+		if sound.name == selectedSound then
+			self.selectedSound = sound.name
+			return sound.name, sound.label or sound.name, index, #choices
+		end
+	end
+
+	self.selectedSound = choices[1].name
+	return choices[1].name, choices[1].label or choices[1].name, 1, #choices
+end
+
+function PartyInterference:SelectSoundOffset(offset)
+	local choices = self:GetSoundChoices()
+	if #choices == 0 then
+		return false
+	end
+
+	local _, _, selectedIndex = self:GetSelectedSound()
+	local nextIndex = selectedIndex + offset
+
+	if nextIndex < 1 then
+		nextIndex = #choices
+	elseif nextIndex > #choices then
+		nextIndex = 1
+	end
+
+	self.selectedSound = choices[nextIndex].name
+	WEP:Log("Pranks", "sound_selected", {
+		sound = self.selectedSound,
+	})
+	self:RefreshWindow()
+	return true
+end
+
+function PartyInterference:SelectPreviousSound()
+	return self:SelectSoundOffset(-1)
+end
+
+function PartyInterference:SelectNextSound()
+	return self:SelectSoundOffset(1)
+end
+
+function PartyInterference:TestSelectedSound()
+	if not Sound or not Sound.Play then
+		WEP:Print("Sound tool unavailable.")
+		return false
+	end
+
+	local sound = self:GetSelectedSound()
+	local ok, playbackOrErr = Sound.Play(sound, {
+		duration = 1,
+	})
+
+	if not ok then
+		WEP:Print("Sound failed:", playbackOrErr)
+		return false
+	end
+
+	return true
 end
 
 function PartyInterference:GetSelectedAction()
@@ -733,70 +927,95 @@ function PartyInterference:SendAction(actionConfig)
 		return false
 	end
 
-	local target = self:GetSelectedTarget()
-	if not target then
-		WEP:Print("Select a party member first.")
+	local targets = self:GetSelectedTargets()
+	if #targets == 0 then
+		WEP:Print("Select at least one party member first.")
 		self:RefreshWindow()
 		return false
 	end
 
 	self:ReadWindowSettings()
 
-	local payload = {
-		t = shortName(target),
-		a = actionConfig.wireAction or actionConfig.action,
-		d = self.durationSeconds,
-		n = self.includeSender and "1" or "0",
-		id = self:MakeEffectId(),
-	}
-
-	if actionConfig.usesPercent then
-		payload.i = self.percent
+	local actionSound = actionConfig.sound
+	if actionConfig.usesSoundSelection then
+		actionSound = self:GetSelectedSound()
 	end
 
-	if actionConfig.variant then
-		payload.v = actionConfig.variant
+	local sentCount = 0
+	local failedCount = 0
+	local lastError
+
+	for _, target in ipairs(targets) do
+		local payload = {
+			t = shortName(target),
+			a = actionConfig.wireAction or actionConfig.action,
+			d = self.durationSeconds,
+			n = self.includeSender and "1" or "0",
+			id = self:MakeEffectId(),
+		}
+
+		if actionConfig.usesPercent then
+			payload.i = self.percent
+		end
+
+		if actionConfig.variant then
+			payload.v = actionConfig.variant
+		end
+
+		if not isBlank(self.customMessage) then
+			payload.m = self.customMessage
+		end
+
+		if actionConfig.group then
+			payload.g = actionConfig.group
+		end
+
+		if actionSound then
+			payload.s = actionSound
+		end
+
+		if actionConfig.trigger then
+			payload.k = actionConfig.wireTrigger or actionConfig.trigger
+		end
+
+		local ok, messageIdOrErr = WEP.Comm:Send(MSG_ACTION, payload, WEP.Comm:GetDefaultBroadcastOptions())
+		if ok then
+			sentCount = sentCount + 1
+			WEP:Log("Pranks", "send_queued", {
+				target = target,
+				action = actionConfig.action,
+				group = actionConfig.group or "none",
+				trigger = actionConfig.trigger or "none",
+				variant = actionConfig.variant or "none",
+				sound = payload.s or "none",
+				messageId = messageIdOrErr,
+			})
+		else
+			failedCount = failedCount + 1
+			lastError = messageIdOrErr
+			WEP:Log("Pranks", "send_failed", {
+				target = target,
+				action = actionConfig.action,
+				error = messageIdOrErr,
+			}, "error")
+		end
 	end
 
-	if not isBlank(self.customMessage) then
-		payload.m = self.customMessage
-	end
-
-	if actionConfig.group then
-		payload.g = actionConfig.group
-	end
-
-	if actionConfig.sound then
-		payload.s = actionConfig.sound
-	end
-
-	if actionConfig.trigger then
-		payload.k = actionConfig.wireTrigger or actionConfig.trigger
-	end
-
-	local ok, messageIdOrErr = WEP.Comm:Send(MSG_ACTION, payload, WEP.Comm:GetDefaultBroadcastOptions())
-	if not ok then
-		WEP:Log("Pranks", "send_failed", {
-			target = target,
-			action = actionConfig.action,
-			error = messageIdOrErr,
-		}, "error")
-		WEP:Print("Prank failed:", messageIdOrErr)
+	if sentCount == 0 then
+		WEP:Print("Prank failed:", lastError)
 		self:RefreshWindow()
 		return false
 	end
 
-	WEP:Log("Pranks", "send_queued", {
-		target = target,
-		action = actionConfig.action,
-		group = actionConfig.group or "none",
-		trigger = actionConfig.trigger or "none",
-		variant = actionConfig.variant or "none",
-		sound = payload.s or "none",
-		messageId = messageIdOrErr,
-	})
-	WEP:Print("Prank sent to", shortName(target) .. ":", actionConfig.text or actionConfig.action)
-	self:RefreshWindow("Queued " .. (actionConfig.text or actionConfig.action) .. " for " .. shortName(target) .. ".")
+	local actionText = actionConfig.text or actionConfig.action
+	local targetLabel = self:GetSelectedTargetLabel(targets)
+	if failedCount > 0 then
+		WEP:Print("Prank sent to", sentCount, "target(s); failed", failedCount .. ":", lastError)
+	else
+		WEP:Print("Prank sent to", targetLabel .. ":", actionText)
+	end
+
+	self:RefreshWindow("Queued " .. actionText .. " for " .. targetLabel .. ".")
 	return true
 end
 
@@ -1020,7 +1239,7 @@ function PartyInterference:RefreshActionRows()
 
 	local _, selectedIndex = self:GetSelectedAction()
 	local items = self:GetVisibleActionItems()
-	local hasTarget = self:GetSelectedTarget() ~= nil
+	local hasTarget = self:GetSelectedTargets()[1] ~= nil
 
 	window.actionFrame:SetHeight(#items * ACTION_ROW_HEIGHT)
 
@@ -1193,8 +1412,44 @@ function PartyInterference:EnsureWindow()
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
 	window.senderCheckLabel:SetText("Include sender name")
 
+	window.soundSelectorLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	window.soundSelectorLabel:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -8)
+	window.soundSelectorLabel:SetText("Sound")
+
+	window.soundSelectedText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.soundSelectedText:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -3)
+	window.soundSelectedText:SetWidth(185)
+	window.soundSelectedText:SetJustifyH("LEFT")
+
+	window.soundPreviousButton = Form.CreateButton(content, {
+		text = "<",
+		width = 28,
+		onClick = function()
+			self:SelectPreviousSound()
+		end,
+	})
+	window.soundPreviousButton:SetPoint("LEFT", window.soundSelectedText, "RIGHT", 8, 0)
+
+	window.soundNextButton = Form.CreateButton(content, {
+		text = ">",
+		width = 28,
+		onClick = function()
+			self:SelectNextSound()
+		end,
+	})
+	window.soundNextButton:SetPoint("LEFT", window.soundPreviousButton, "RIGHT", 4, 0)
+
+	window.soundTestButton = Form.CreateButton(content, {
+		text = "Test",
+		width = 50,
+		onClick = function()
+			self:TestSelectedSound()
+		end,
+	})
+	window.soundTestButton:SetPoint("LEFT", window.soundNextButton, "RIGHT", 6, 0)
+
 	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -12)
+	window.actionTitle:SetPoint("TOPLEFT", window.soundSelectedText, "BOTTOMLEFT", 0, -12)
 	window.actionTitle:SetText("Prank")
 
 	window.scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
@@ -1224,6 +1479,24 @@ function PartyInterference:EnsureWindow()
 	})
 	window.clearButton:SetPoint("LEFT", window.startButton, "RIGHT", 8, 0)
 
+	window.selectAllButton = Form.CreateButton(window.footer, {
+		text = "All Party",
+		width = 76,
+		onClick = function()
+			self:SelectAllTargets()
+		end,
+	})
+	window.selectAllButton:SetPoint("LEFT", window.clearButton, "RIGHT", 8, 0)
+
+	window.clearTargetsButton = Form.CreateButton(window.footer, {
+		text = "None",
+		width = 58,
+		onClick = function()
+			self:ClearSelectedTargets()
+		end,
+	})
+	window.clearTargetsButton:SetPoint("LEFT", window.selectAllButton, "RIGHT", 8, 0)
+
 	window.refreshButton = Form.CreateButton(window.footer, {
 		text = "Refresh",
 		width = 88,
@@ -1231,7 +1504,7 @@ function PartyInterference:EnsureWindow()
 			self:RefreshWindow("Party list refreshed.")
 		end,
 	})
-	window.refreshButton:SetPoint("LEFT", window.clearButton, "RIGHT", 8, 0)
+	window.refreshButton:SetPoint("LEFT", window.clearTargetsButton, "RIGHT", 8, 0)
 
 	interferenceWindow = window
 	self:RefreshActionRows()
@@ -1248,16 +1521,22 @@ function PartyInterference:RefreshWindow(statusText)
 	self:ReadWindowSettings()
 
 	local members = self:GetPartyMembers()
-	local selectedTarget = self:GetSelectedTarget()
-	local hasTarget = selectedTarget ~= nil
+	local selectedTargets = self:GetSelectedTargets()
+	local hasTarget = #selectedTargets > 0
 	local activeCount = Interference.GetStatus().activeCount
 	local actionConfig = self:GetSelectedAction()
 	local usesPercent = actionConfig and actionConfig.usesPercent == true
 	local canStart = hasTarget and self:IsSelectedActionVisible()
+	local _, soundLabel, soundIndex, soundCount = self:GetSelectedSound()
+	local soundText = soundLabel .. " (" .. soundIndex .. "/" .. soundCount .. ")"
+
+	if #soundText > 32 then
+		soundText = soundText:sub(1, 29) .. "..."
+	end
 
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
-	window.selectedText:SetText("Target: " .. (selectedTarget and shortName(selectedTarget) or "none"))
-	window.partyList:SetItems(self:GetPartyItems())
+	window.selectedText:SetText("Targets: " .. self:GetSelectedTargetLabel(selectedTargets))
+	window.partyList:SetItems(self:GetPartyItems(members))
 	self:RefreshActionRows()
 	self:ApplyWindowFit()
 
@@ -1282,9 +1561,18 @@ function PartyInterference:RefreshWindow(statusText)
 		window.senderCheck:SetChecked(self.includeSender ~= false)
 	end
 
+	if window.soundSelectedText then
+		window.soundSelectedText:SetText(soundText)
+	end
+
 	setButtonEnabled(window.startButton, canStart)
 	setButtonEnabled(window.clearButton, hasTarget)
+	setButtonEnabled(window.selectAllButton, #members > 0)
+	setButtonEnabled(window.clearTargetsButton, hasTarget)
 	setButtonEnabled(window.refreshButton, true)
+	setButtonEnabled(window.soundPreviousButton, soundCount > 1)
+	setButtonEnabled(window.soundNextButton, soundCount > 1)
+	setButtonEnabled(window.soundTestButton, Sound ~= nil and Sound.Play ~= nil)
 end
 
 function PartyInterference:ShowWindow()
