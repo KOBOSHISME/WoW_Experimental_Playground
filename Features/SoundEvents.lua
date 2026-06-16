@@ -44,6 +44,7 @@ local TRIGGER_RARE_LOOT = "rareLoot"
 local TRIGGER_UNDERWATER = "underwater"
 
 local DEFAULT_COOLDOWN_SECONDS = 2
+local UNDERWATER_COOLDOWN_SECONDS = 60 * 60
 local STATE_CHECK_DELAY = 0.5
 local BREATH_TIMER_NAME = "BREATH"
 local ROW_HEIGHT = 46
@@ -325,7 +326,7 @@ local TRIGGERS = {
 		sound = "wep_under_the_water",
 		soundLabel = "Under the Water",
 		defaultEnabled = true,
-		cooldown = DEFAULT_COOLDOWN_SECONDS,
+		cooldown = UNDERWATER_COOLDOWN_SECONDS,
 	},
 }
 

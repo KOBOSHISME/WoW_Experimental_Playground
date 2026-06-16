@@ -130,7 +130,7 @@ Current built-in triggers:
 - Rested Area -> Hub Intro when you enter a rested area or inn.
 - Level Up -> Anime Wow when you level up.
 - Rare Loot -> Rizz when you loot a rare, epic, or better item.
-- Underwater -> Under the Water when your breath timer starts after diving underwater.
+- Underwater -> Under the Water when your breath timer starts after diving underwater, with a 1-hour cooldown.
 
 Dungeon Entry ignores raids and battlegrounds. Dungeon, rested, party roster, and party leader state are primed on reload/login so the addon does not shout at you just for loading in.
 
