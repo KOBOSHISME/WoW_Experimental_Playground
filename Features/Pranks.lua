@@ -46,11 +46,11 @@ local DEFAULT_PERCENT = 70
 local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
-local ACTION_ROW_HEIGHT = 46
-local WINDOW_BASE_WIDTH = 560
-local WINDOW_BASE_HEIGHT = 430
-local WINDOW_MIN_WIDTH = 560
-local WINDOW_MIN_HEIGHT = 430
+local ACTION_ROW_HEIGHT = 42
+local WINDOW_BASE_WIDTH = 520
+local WINDOW_BASE_HEIGHT = 360
+local WINDOW_MIN_WIDTH = 520
+local WINDOW_MIN_HEIGHT = 260
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -1406,6 +1406,7 @@ function PartyInterference:EnsureWindow()
 		height = WINDOW_BASE_HEIGHT,
 		minWidth = WINDOW_MIN_WIDTH,
 		minHeight = WINDOW_MIN_HEIGHT,
+		collapsible = true,
 		onShow = function()
 			self:RefreshWindow()
 		end,
@@ -1442,7 +1443,7 @@ function PartyInterference:EnsureWindow()
 
 	window.partyList = List.Create(content, {
 		width = 190,
-		visibleRows = 4,
+		visibleRows = 3,
 		rowHeight = 24,
 		emptyText = "No party members.",
 		columns = {
@@ -1462,28 +1463,28 @@ function PartyInterference:EnsureWindow()
 		label = "Duration",
 		value = self.durationSeconds,
 		numeric = true,
-		width = 72,
+		width = 64,
 	})
-	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 18, 0)
+	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 14, 0)
 
 	window.percentInput = Form.CreateInput(content, {
 		label = "Percent",
 		value = self.percent,
 		numeric = true,
-		width = 72,
+		width = 64,
 	})
-	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 12, 0)
+	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 10, 0)
 
 	window.messageInput = Form.CreateInput(content, {
 		label = "Message",
 		value = self.customMessage,
-		width = 188,
+		width = 186,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
-	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -8)
+	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -3)
 
 	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", -4, -2)
+	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "TOPRIGHT", 8, -14)
 	window.senderCheck:SetChecked(self.includeSender ~= false)
 
 	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -1499,12 +1500,12 @@ function PartyInterference:EnsureWindow()
 	window.soundCheckLabel:SetText("Add sound to prank")
 
 	window.soundSelectorLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	window.soundSelectorLabel:SetPoint("TOPLEFT", window.soundCheck, "BOTTOMLEFT", 4, -8)
+	window.soundSelectorLabel:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", 0, -2)
 	window.soundSelectorLabel:SetText("Sound")
 
 	window.soundSelectedText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	window.soundSelectedText:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -3)
-	window.soundSelectedText:SetWidth(185)
+	window.soundSelectedText:SetPoint("LEFT", window.soundSelectorLabel, "RIGHT", 10, 0)
+	window.soundSelectedText:SetWidth(96)
 	window.soundSelectedText:SetJustifyH("LEFT")
 
 	window.soundPreviousButton = Form.CreateButton(content, {
@@ -1535,7 +1536,7 @@ function PartyInterference:EnsureWindow()
 	window.soundTestButton:SetPoint("LEFT", window.soundNextButton, "RIGHT", 6, 0)
 
 	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.soundSelectedText, "BOTTOMLEFT", 0, -12)
+	window.actionTitle:SetPoint("TOPLEFT", window.soundSelectedText, "BOTTOMLEFT", 0, -10)
 	window.actionTitle:SetText("Prank")
 
 	window.scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
@@ -1616,8 +1617,8 @@ function PartyInterference:RefreshWindow(statusText)
 	local _, soundLabel, soundIndex, soundCount = self:GetSelectedSound()
 	local soundText = soundLabel .. " (" .. soundIndex .. "/" .. soundCount .. ")"
 
-	if #soundText > 32 then
-		soundText = soundText:sub(1, 29) .. "..."
+	if #soundText > 18 then
+		soundText = soundText:sub(1, 15) .. "..."
 	end
 
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
