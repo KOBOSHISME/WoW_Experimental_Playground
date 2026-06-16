@@ -47,13 +47,16 @@ local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
 local ACTION_ROW_HEIGHT = 38
-local PARTY_LIST_WIDTH = 152
-local PARTY_LIST_VISIBLE_ROWS = 2
+local COLUMN_GAP = 12
+local PARTY_LIST_WIDTH = 166
+local ACTION_COLUMN_WIDTH = 300
+local CONFIG_INPUT_WIDTH = 218
+local PARTY_LIST_VISIBLE_ROWS = 10
 local PARTY_LIST_ROW_HEIGHT = 20
-local WINDOW_BASE_WIDTH = 520
-local WINDOW_BASE_HEIGHT = 360
-local WINDOW_MIN_WIDTH = 520
-local WINDOW_MIN_HEIGHT = 260
+local WINDOW_BASE_WIDTH = 760
+local WINDOW_BASE_HEIGHT = 390
+local WINDOW_MIN_WIDTH = 760
+local WINDOW_MIN_HEIGHT = 390
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -1442,12 +1445,32 @@ function PartyInterference:EnsureWindow()
 	})
 	window.clearSelfButton:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 2)
 
-	window.selectedText = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.selectedText:SetPoint("TOPLEFT", window.statusText, "BOTTOMLEFT", 0, -10)
-	window.selectedText:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+	window.partyColumn = CreateFrame("Frame", nil, content)
+	window.partyColumn:SetPoint("TOPLEFT", window.statusText, "BOTTOMLEFT", 0, -10)
+	window.partyColumn:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 0, 0)
+	window.partyColumn:SetWidth(PARTY_LIST_WIDTH)
+
+	window.actionColumn = CreateFrame("Frame", nil, content)
+	window.actionColumn:SetPoint("TOPLEFT", window.partyColumn, "TOPRIGHT", COLUMN_GAP, 0)
+	window.actionColumn:SetPoint("BOTTOMLEFT", window.partyColumn, "BOTTOMRIGHT", COLUMN_GAP, 0)
+	window.actionColumn:SetWidth(ACTION_COLUMN_WIDTH)
+
+	window.configColumn = CreateFrame("Frame", nil, content)
+	window.configColumn:SetPoint("TOPLEFT", window.actionColumn, "TOPRIGHT", COLUMN_GAP, 0)
+	window.configColumn:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+
+	window.partyTitle = window.partyColumn:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	window.partyTitle:SetPoint("TOPLEFT", window.partyColumn, "TOPLEFT", 0, 0)
+	window.partyTitle:SetPoint("RIGHT", window.partyColumn, "RIGHT", 0, 0)
+	window.partyTitle:SetJustifyH("LEFT")
+	window.partyTitle:SetText("Party Members")
+
+	window.selectedText = window.partyColumn:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	window.selectedText:SetPoint("TOPLEFT", window.partyTitle, "BOTTOMLEFT", 0, -6)
+	window.selectedText:SetPoint("RIGHT", window.partyColumn, "RIGHT", 0, 0)
 	window.selectedText:SetJustifyH("LEFT")
 
-	window.partyList = List.Create(content, {
+	window.partyList = List.Create(window.partyColumn, {
 		width = PARTY_LIST_WIDTH,
 		visibleRows = PARTY_LIST_VISIBLE_ROWS,
 		rowHeight = PARTY_LIST_ROW_HEIGHT,
@@ -1455,26 +1478,45 @@ function PartyInterference:EnsureWindow()
 		columns = {
 			{
 				key = "name",
-				width = 92,
+				width = 102,
 			},
 			{
 				key = "state",
-				width = 44,
+				width = 50,
 				justifyH = "RIGHT",
 			},
 		},
 	})
 	window.partyList.frame:SetPoint("TOPLEFT", window.selectedText, "BOTTOMLEFT", 0, -8)
 
-	window.durationInput = Form.CreateInput(content, {
+	window.actionTitle = window.actionColumn:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	window.actionTitle:SetPoint("TOPLEFT", window.actionColumn, "TOPLEFT", 0, 0)
+	window.actionTitle:SetText("Prank List")
+
+	window.scrollFrame = CreateFrame("ScrollFrame", nil, window.actionColumn, "UIPanelScrollFrameTemplate")
+	window.scrollFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -4)
+	window.scrollFrame:SetPoint("BOTTOMRIGHT", window.actionColumn, "BOTTOMRIGHT", -24, 0)
+
+	window.actionFrame = CreateFrame("Frame", nil, window.scrollFrame)
+	window.actionFrame:SetSize(ACTION_COLUMN_WIDTH, ACTION_ROW_HEIGHT * #ACTIONS)
+	window.scrollFrame:SetScrollChild(window.actionFrame)
+	window.actionRows = {}
+
+	window.configTitle = window.configColumn:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	window.configTitle:SetPoint("TOPLEFT", window.configColumn, "TOPLEFT", 0, 0)
+	window.configTitle:SetPoint("RIGHT", window.configColumn, "RIGHT", 0, 0)
+	window.configTitle:SetJustifyH("LEFT")
+	window.configTitle:SetText("Configuration")
+
+	window.durationInput = Form.CreateInput(window.configColumn, {
 		label = "Duration",
 		value = self.durationSeconds,
 		numeric = true,
 		width = 64,
 	})
-	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 12, 0)
+	window.durationInput:SetPoint("TOPLEFT", window.configTitle, "BOTTOMLEFT", 0, -8)
 
-	window.percentInput = Form.CreateInput(content, {
+	window.percentInput = Form.CreateInput(window.configColumn, {
 		label = "Percent",
 		value = self.percent,
 		numeric = true,
@@ -1482,33 +1524,33 @@ function PartyInterference:EnsureWindow()
 	})
 	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 8, 0)
 
-	window.messageInput = Form.CreateInput(content, {
+	window.messageInput = Form.CreateInput(window.configColumn, {
 		label = "Message",
 		value = self.customMessage,
-		width = 286,
+		width = CONFIG_INPUT_WIDTH,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
 	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -2)
 
-	window.soundSelectorLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	window.soundSelectorLabel = window.configColumn:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	window.soundSelectorLabel:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", 0, -1)
 	window.soundSelectorLabel:SetText("Sound")
 
-	window.soundSelectedText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	window.soundSelectedText:SetPoint("LEFT", window.soundSelectorLabel, "RIGHT", 10, 0)
-	window.soundSelectedText:SetWidth(118)
+	window.soundSelectedText = window.configColumn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.soundSelectedText:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -6)
+	window.soundSelectedText:SetWidth(CONFIG_INPUT_WIDTH)
 	window.soundSelectedText:SetJustifyH("LEFT")
 
-	window.soundPreviousButton = Form.CreateButton(content, {
+	window.soundPreviousButton = Form.CreateButton(window.configColumn, {
 		text = "<",
 		width = 28,
 		onClick = function()
 			self:SelectPreviousSound()
 		end,
 	})
-	window.soundPreviousButton:SetPoint("LEFT", window.soundSelectedText, "RIGHT", 8, 0)
+	window.soundPreviousButton:SetPoint("TOPLEFT", window.soundSelectedText, "BOTTOMLEFT", 0, -6)
 
-	window.soundNextButton = Form.CreateButton(content, {
+	window.soundNextButton = Form.CreateButton(window.configColumn, {
 		text = ">",
 		width = 28,
 		onClick = function()
@@ -1517,7 +1559,7 @@ function PartyInterference:EnsureWindow()
 	})
 	window.soundNextButton:SetPoint("LEFT", window.soundPreviousButton, "RIGHT", 4, 0)
 
-	window.soundTestButton = Form.CreateButton(content, {
+	window.soundTestButton = Form.CreateButton(window.configColumn, {
 		text = "Test",
 		width = 50,
 		onClick = function()
@@ -1526,34 +1568,21 @@ function PartyInterference:EnsureWindow()
 	})
 	window.soundTestButton:SetPoint("LEFT", window.soundNextButton, "RIGHT", 6, 0)
 
-	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-	window.senderCheck:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -6)
+	window.senderCheck = CreateFrame("CheckButton", nil, window.configColumn, "UICheckButtonTemplate")
+	window.senderCheck:SetPoint("TOPLEFT", window.soundPreviousButton, "BOTTOMLEFT", 0, -8)
 	window.senderCheck:SetChecked(self.includeSender ~= false)
 
-	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.senderCheckLabel = window.configColumn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
 	window.senderCheckLabel:SetText("Show sender")
 
-	window.soundCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+	window.soundCheck = CreateFrame("CheckButton", nil, window.configColumn, "UICheckButtonTemplate")
 	window.soundCheck:SetPoint("LEFT", window.senderCheckLabel, "RIGHT", 18, 0)
 	window.soundCheck:SetChecked(self.includeSound == true)
 
-	window.soundCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.soundCheckLabel = window.configColumn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	window.soundCheckLabel:SetPoint("LEFT", window.soundCheck, "RIGHT", 0, 0)
 	window.soundCheckLabel:SetText("Add sound")
-
-	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 0, -8)
-	window.actionTitle:SetText("Prank List")
-
-	window.scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
-	window.scrollFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -4)
-	window.scrollFrame:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -24, 0)
-
-	window.actionFrame = CreateFrame("Frame", nil, window.scrollFrame)
-	window.actionFrame:SetSize(WINDOW_BASE_WIDTH - PARTY_LIST_WIDTH - 56, ACTION_ROW_HEIGHT * #ACTIONS)
-	window.scrollFrame:SetScrollChild(window.actionFrame)
-	window.actionRows = {}
 
 	window.startButton = Form.CreateButton(window.footer, {
 		text = "Send Selected",
@@ -1624,8 +1653,8 @@ function PartyInterference:RefreshWindow(statusText)
 	local _, soundLabel, soundIndex, soundCount = self:GetSelectedSound()
 	local soundText = soundLabel .. " (" .. soundIndex .. "/" .. soundCount .. ")"
 
-	if #soundText > 18 then
-		soundText = soundText:sub(1, 15) .. "..."
+	if #soundText > 28 then
+		soundText = soundText:sub(1, 25) .. "..."
 	end
 
 	window.statusText:SetText(statusText or ("Party members: " .. #members .. "  Active effects on you: " .. activeCount))
