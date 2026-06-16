@@ -46,7 +46,10 @@ local DEFAULT_PERCENT = 70
 local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
-local ACTION_ROW_HEIGHT = 42
+local ACTION_ROW_HEIGHT = 38
+local PARTY_LIST_WIDTH = 160
+local PARTY_LIST_VISIBLE_ROWS = 2
+local PARTY_LIST_ROW_HEIGHT = 22
 local WINDOW_BASE_WIDTH = 520
 local WINDOW_BASE_HEIGHT = 360
 local WINDOW_MIN_WIDTH = 520
@@ -1251,29 +1254,32 @@ local function ensureActionRow(window, index)
 	row.background:SetAllPoints(row)
 
 	row.check = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-	row.check:SetPoint("LEFT", row, "LEFT", -4, 0)
+	row.check:SetPoint("LEFT", row, "LEFT", -2, 0)
 
 	row.title = row:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	row.title:SetPoint("TOPLEFT", row.check, "TOPRIGHT", 2, -4)
-	row.title:SetWidth(220)
+	row.title:SetWidth(132)
 	row.title:SetJustifyH("LEFT")
 
-	row.description = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -2)
-	row.description:SetWidth(250)
+	row.description = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -1)
+	row.description:SetWidth(160)
 	row.description:SetJustifyH("LEFT")
 	row.description:SetJustifyV("TOP")
 	if row.description.SetWordWrap then
 		row.description:SetWordWrap(false)
 	end
+	if row.description.SetTextColor then
+		row.description:SetTextColor(0.72, 0.72, 0.72, 1)
+	end
 
 	row.type = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	row.type:SetPoint("TOPRIGHT", row, "TOPRIGHT", -74, -5)
-	row.type:SetWidth(110)
+	row.type:SetPoint("TOPRIGHT", row, "TOPRIGHT", -66, -5)
+	row.type:SetWidth(72)
 	row.type:SetJustifyH("RIGHT")
 
 	row.sendButton = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-	row.sendButton:SetSize(58, 22)
+	row.sendButton:SetSize(54, 20)
 	row.sendButton:SetPoint("RIGHT", row, "RIGHT", -8, 0)
 	row.sendButton:SetText("Send")
 
@@ -1328,9 +1334,9 @@ function PartyInterference:RefreshActionRows()
 		row.actionIndex = item.index
 
 		if selected then
-			setSolidColor(row.background, 0.15, 0.45, 0.25, 0.42)
+			setSolidColor(row.background, 0.15, 0.45, 0.25, 0.5)
 		else
-			setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.14 or 0.06)
+			setSolidColor(row.background, 0, 0, 0, index % 2 == 0 and 0.18 or 0.08)
 		end
 
 		row.check:SetChecked(selected)
@@ -1442,18 +1448,19 @@ function PartyInterference:EnsureWindow()
 	window.selectedText:SetJustifyH("LEFT")
 
 	window.partyList = List.Create(content, {
-		width = 190,
-		visibleRows = 3,
-		rowHeight = 24,
+		width = PARTY_LIST_WIDTH,
+		visibleRows = PARTY_LIST_VISIBLE_ROWS,
+		rowHeight = PARTY_LIST_ROW_HEIGHT,
 		emptyText = "No party members.",
 		columns = {
 			{
 				key = "name",
-				width = 120,
+				width = 100,
 			},
 			{
 				key = "state",
-				width = 42,
+				width = 46,
+				justifyH = "RIGHT",
 			},
 		},
 	})
@@ -1465,7 +1472,7 @@ function PartyInterference:EnsureWindow()
 		numeric = true,
 		width = 64,
 	})
-	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 14, 0)
+	window.durationInput:SetPoint("TOPLEFT", window.partyList.frame, "TOPRIGHT", 12, 0)
 
 	window.percentInput = Form.CreateInput(content, {
 		label = "Percent",
@@ -1473,15 +1480,15 @@ function PartyInterference:EnsureWindow()
 		numeric = true,
 		width = 64,
 	})
-	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 10, 0)
+	window.percentInput:SetPoint("LEFT", window.durationInput, "RIGHT", 8, 0)
 
 	window.messageInput = Form.CreateInput(content, {
 		label = "Message",
 		value = self.customMessage,
-		width = 186,
+		width = 208,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
-	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -3)
+	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -2)
 
 	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
 	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "TOPRIGHT", 8, -14)
@@ -1489,6 +1496,8 @@ function PartyInterference:EnsureWindow()
 
 	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
+	window.senderCheckLabel:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+	window.senderCheckLabel:SetJustifyH("LEFT")
 	window.senderCheckLabel:SetText("Include sender name")
 
 	window.soundCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
@@ -1497,15 +1506,17 @@ function PartyInterference:EnsureWindow()
 
 	window.soundCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	window.soundCheckLabel:SetPoint("LEFT", window.soundCheck, "RIGHT", 0, 0)
+	window.soundCheckLabel:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+	window.soundCheckLabel:SetJustifyH("LEFT")
 	window.soundCheckLabel:SetText("Add sound to prank")
 
 	window.soundSelectorLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	window.soundSelectorLabel:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", 0, -2)
+	window.soundSelectorLabel:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", 0, -1)
 	window.soundSelectorLabel:SetText("Sound")
 
 	window.soundSelectedText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	window.soundSelectedText:SetPoint("LEFT", window.soundSelectorLabel, "RIGHT", 10, 0)
-	window.soundSelectedText:SetWidth(96)
+	window.soundSelectedText:SetWidth(118)
 	window.soundSelectedText:SetJustifyH("LEFT")
 
 	window.soundPreviousButton = Form.CreateButton(content, {
@@ -1536,15 +1547,15 @@ function PartyInterference:EnsureWindow()
 	window.soundTestButton:SetPoint("LEFT", window.soundNextButton, "RIGHT", 6, 0)
 
 	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.soundSelectedText, "BOTTOMLEFT", 0, -10)
-	window.actionTitle:SetText("Prank")
+	window.actionTitle:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -6)
+	window.actionTitle:SetText("Prank List")
 
 	window.scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
-	window.scrollFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -6)
+	window.scrollFrame:SetPoint("TOPLEFT", window.actionTitle, "BOTTOMLEFT", -4, -4)
 	window.scrollFrame:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -24, 0)
 
 	window.actionFrame = CreateFrame("Frame", nil, window.scrollFrame)
-	window.actionFrame:SetSize(WINDOW_BASE_WIDTH - 58, ACTION_ROW_HEIGHT * #ACTIONS)
+	window.actionFrame:SetSize(WINDOW_BASE_WIDTH - PARTY_LIST_WIDTH - 56, ACTION_ROW_HEIGHT * #ACTIONS)
 	window.scrollFrame:SetScrollChild(window.actionFrame)
 	window.actionRows = {}
 
