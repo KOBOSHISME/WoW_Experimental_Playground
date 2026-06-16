@@ -47,9 +47,9 @@ local MAX_MESSAGE_LENGTH = 60
 local DEFAULT_SOUND = "wep_alert"
 local NOTICE_SECONDS = 3
 local ACTION_ROW_HEIGHT = 38
-local PARTY_LIST_WIDTH = 160
+local PARTY_LIST_WIDTH = 152
 local PARTY_LIST_VISIBLE_ROWS = 2
-local PARTY_LIST_ROW_HEIGHT = 22
+local PARTY_LIST_ROW_HEIGHT = 20
 local WINDOW_BASE_WIDTH = 520
 local WINDOW_BASE_HEIGHT = 360
 local WINDOW_MIN_WIDTH = 520
@@ -1455,11 +1455,11 @@ function PartyInterference:EnsureWindow()
 		columns = {
 			{
 				key = "name",
-				width = 100,
+				width = 92,
 			},
 			{
 				key = "state",
-				width = 46,
+				width = 44,
 				justifyH = "RIGHT",
 			},
 		},
@@ -1485,30 +1485,10 @@ function PartyInterference:EnsureWindow()
 	window.messageInput = Form.CreateInput(content, {
 		label = "Message",
 		value = self.customMessage,
-		width = 208,
+		width = 286,
 		maxLetters = MAX_MESSAGE_LENGTH,
 	})
 	window.messageInput:SetPoint("TOPLEFT", window.durationInput, "BOTTOMLEFT", 0, -2)
-
-	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-	window.senderCheck:SetPoint("TOPLEFT", window.messageInput, "TOPRIGHT", 8, -14)
-	window.senderCheck:SetChecked(self.includeSender ~= false)
-
-	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
-	window.senderCheckLabel:SetPoint("RIGHT", content, "RIGHT", -4, 0)
-	window.senderCheckLabel:SetJustifyH("LEFT")
-	window.senderCheckLabel:SetText("Include sender name")
-
-	window.soundCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-	window.soundCheck:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 0, -2)
-	window.soundCheck:SetChecked(self.includeSound == true)
-
-	window.soundCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	window.soundCheckLabel:SetPoint("LEFT", window.soundCheck, "RIGHT", 0, 0)
-	window.soundCheckLabel:SetPoint("RIGHT", content, "RIGHT", -4, 0)
-	window.soundCheckLabel:SetJustifyH("LEFT")
-	window.soundCheckLabel:SetText("Add sound to prank")
 
 	window.soundSelectorLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	window.soundSelectorLabel:SetPoint("TOPLEFT", window.messageInput, "BOTTOMLEFT", 0, -1)
@@ -1546,8 +1526,24 @@ function PartyInterference:EnsureWindow()
 	})
 	window.soundTestButton:SetPoint("LEFT", window.soundNextButton, "RIGHT", 6, 0)
 
+	window.senderCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+	window.senderCheck:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -6)
+	window.senderCheck:SetChecked(self.includeSender ~= false)
+
+	window.senderCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
+	window.senderCheckLabel:SetText("Show sender")
+
+	window.soundCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+	window.soundCheck:SetPoint("LEFT", window.senderCheckLabel, "RIGHT", 18, 0)
+	window.soundCheck:SetChecked(self.includeSound == true)
+
+	window.soundCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.soundCheckLabel:SetPoint("LEFT", window.soundCheck, "RIGHT", 0, 0)
+	window.soundCheckLabel:SetText("Add sound")
+
 	window.actionTitle = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-	window.actionTitle:SetPoint("TOPLEFT", window.soundSelectorLabel, "BOTTOMLEFT", 0, -6)
+	window.actionTitle:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 0, -8)
 	window.actionTitle:SetText("Prank List")
 
 	window.scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
