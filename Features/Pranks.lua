@@ -57,6 +57,7 @@ local WINDOW_BASE_WIDTH = 760
 local WINDOW_BASE_HEIGHT = 390
 local WINDOW_MIN_WIDTH = 760
 local WINDOW_MIN_HEIGHT = 390
+local WINDOW_COLLAPSED_WIDTH = 170
 
 local ALLOWED_UI_GROUPS = {
 	actionbars = true,
@@ -1415,7 +1416,9 @@ function PartyInterference:EnsureWindow()
 		height = WINDOW_BASE_HEIGHT,
 		minWidth = WINDOW_MIN_WIDTH,
 		minHeight = WINDOW_MIN_HEIGHT,
+		collapsedWidth = WINDOW_COLLAPSED_WIDTH,
 		collapsible = true,
+		closeOnEscape = false,
 		onShow = function()
 			self:RefreshWindow()
 		end,

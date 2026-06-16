@@ -11,6 +11,7 @@ local DEFAULT_WIDTH = 420
 local DEFAULT_HEIGHT = 360
 local MIN_WIDTH = 240
 local MIN_HEIGHT = 160
+local MIN_COLLAPSED_WIDTH = 120
 local PADDING = 14
 local HEADER_HEIGHT = 32
 local FOOTER_HEIGHT = 34
@@ -96,7 +97,12 @@ function Window.Create(config)
 	local minHeight = clamp(config.minHeight, MIN_HEIGHT, MIN_HEIGHT)
 	local width = clamp(config.width, minWidth, DEFAULT_WIDTH)
 	local height = clamp(config.height, minHeight, DEFAULT_HEIGHT)
+	local collapsedWidth = tonumber(config.collapsedWidth) or width
 	local titleRightPadding = config.collapsible and -66 or -42
+
+	if collapsedWidth < MIN_COLLAPSED_WIDTH then
+		collapsedWidth = MIN_COLLAPSED_WIDTH
+	end
 
 	frame:SetSize(width, height)
 	frame:SetPoint(config.point or "CENTER")
@@ -138,6 +144,7 @@ function Window.Create(config)
 		content = frame.content,
 		footer = frame.footer,
 		collapsed = false,
+		expandedWidth = width,
 		expandedHeight = height,
 	}
 
@@ -210,9 +217,11 @@ function Window.Create(config)
 		local nextHeight = clamp(newHeight, minHeight, DEFAULT_HEIGHT)
 
 		if self.collapsed then
+			self.expandedWidth = nextWidth
 			self.expandedHeight = nextHeight
-			frame:SetWidth(nextWidth)
+			frame:SetWidth(collapsedWidth)
 		else
+			self.expandedWidth = nextWidth
 			self.expandedHeight = nextHeight
 			frame:SetSize(nextWidth, nextHeight)
 		end
@@ -234,6 +243,7 @@ function Window.Create(config)
 		self.collapsed = collapsed
 
 		if collapsed then
+			self.expandedWidth = frame:GetWidth()
 			self.expandedHeight = frame:GetHeight()
 			frame.content:Hide()
 			frame.footer:Hide()
@@ -246,12 +256,14 @@ function Window.Create(config)
 				frame:SetResizable(false)
 			end
 
+			frame:SetWidth(collapsedWidth)
 			frame:SetHeight(config.collapsedHeight or COLLAPSED_HEIGHT)
 
 			if frame.collapseButton then
 				frame.collapseButton:SetText("+")
 			end
 		else
+			frame:SetWidth(self.expandedWidth or width)
 			frame:SetHeight(self.expandedHeight or height)
 			frame.content:Show()
 			frame.footer:Show()
@@ -309,7 +321,7 @@ function Window.Create(config)
 		return frame:IsShown() == true
 	end
 
-	if UISpecialFrames and name then
+	if config.closeOnEscape ~= false and UISpecialFrames and name then
 		UISpecialFrames[#UISpecialFrames + 1] = name
 	end
 
