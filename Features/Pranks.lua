@@ -5,6 +5,7 @@ local Pranks = {
 	percent = 70,
 	customMessage = "",
 	includeSender = true,
+	includeSound = false,
 	selectedTarget = nil,
 	selectedTargets = {},
 	selectedActionIndex = 1,
@@ -918,7 +919,20 @@ function PartyInterference:ReadWindowSettings()
 		self.includeSender = getCheckedValue(window.senderCheck)
 	end
 
+	if window and window.soundCheck then
+		self.includeSound = getCheckedValue(window.soundCheck)
+	end
+
 	return self.durationSeconds, self.percent
+end
+
+function PartyInterference:ShouldAttachSelectedSound(actionConfig)
+	if self.includeSound ~= true or not actionConfig then
+		return false
+	end
+
+	local action = actionConfig.action
+	return action ~= "sound" and action ~= "sound_trap" and action ~= "clear"
 end
 
 function PartyInterference:SendAction(actionConfig)
@@ -940,6 +954,8 @@ function PartyInterference:SendAction(actionConfig)
 	if actionConfig.usesSoundSelection then
 		actionSound = self:GetSelectedSound()
 	end
+	local shouldAttachSound = self:ShouldAttachSelectedSound(actionConfig)
+	local attachedSound = shouldAttachSound and self:GetSelectedSound() or nil
 
 	local sentCount = 0
 	local failedCount = 0
@@ -990,6 +1006,34 @@ function PartyInterference:SendAction(actionConfig)
 				sound = payload.s or "none",
 				messageId = messageIdOrErr,
 			})
+
+			if shouldAttachSound then
+				local soundPayload = {
+					t = shortName(target),
+					a = "sound",
+					d = self.durationSeconds,
+					n = self.includeSender and "1" or "0",
+					id = self:MakeEffectId(),
+					s = attachedSound,
+				}
+
+				local soundOk, soundMessageIdOrErr = WEP.Comm:Send(MSG_ACTION, soundPayload, WEP.Comm:GetDefaultBroadcastOptions())
+				if soundOk then
+					WEP:Log("Pranks", "attached_sound_queued", {
+						target = target,
+						sound = soundPayload.s or "none",
+						messageId = soundMessageIdOrErr,
+					})
+				else
+					failedCount = failedCount + 1
+					lastError = soundMessageIdOrErr
+					WEP:Log("Pranks", "attached_sound_failed", {
+						target = target,
+						sound = soundPayload.s or "none",
+						error = soundMessageIdOrErr,
+					}, "error")
+				end
+			end
 		else
 			failedCount = failedCount + 1
 			lastError = messageIdOrErr
@@ -1446,8 +1490,16 @@ function PartyInterference:EnsureWindow()
 	window.senderCheckLabel:SetPoint("LEFT", window.senderCheck, "RIGHT", 0, 0)
 	window.senderCheckLabel:SetText("Include sender name")
 
+	window.soundCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+	window.soundCheck:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 0, -2)
+	window.soundCheck:SetChecked(self.includeSound == true)
+
+	window.soundCheckLabel = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	window.soundCheckLabel:SetPoint("LEFT", window.soundCheck, "RIGHT", 0, 0)
+	window.soundCheckLabel:SetText("Add sound to prank")
+
 	window.soundSelectorLabel = content:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	window.soundSelectorLabel:SetPoint("TOPLEFT", window.senderCheck, "BOTTOMLEFT", 4, -8)
+	window.soundSelectorLabel:SetPoint("TOPLEFT", window.soundCheck, "BOTTOMLEFT", 4, -8)
 	window.soundSelectorLabel:SetText("Sound")
 
 	window.soundSelectedText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
@@ -1593,6 +1645,10 @@ function PartyInterference:RefreshWindow(statusText)
 
 	if window.senderCheck then
 		window.senderCheck:SetChecked(self.includeSender ~= false)
+	end
+
+	if window.soundCheck then
+		window.soundCheck:SetChecked(self.includeSound == true)
 	end
 
 	if window.soundSelectedText then
