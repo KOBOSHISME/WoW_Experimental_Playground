@@ -1037,6 +1037,31 @@ function PartyInterference:SendClear()
 	})
 end
 
+function PartyInterference:ClearSelf()
+	local effects = Interference.GetStatus().effects
+	local cleared = 0
+
+	for _, effect in ipairs(effects) do
+		local ok = Interference.Clear(effect.id)
+		if ok then
+			cleared = cleared + 1
+		end
+	end
+
+	WEP:Log("Pranks", "self_cleared", {
+		count = cleared,
+	})
+
+	if cleared > 0 then
+		WEP:Print("Cleared", cleared, "prank(s) from you.")
+	else
+		WEP:Print("No active pranks on you.")
+	end
+
+	self:RefreshWindow()
+	return cleared
+end
+
 function PartyInterference:ApplyIncomingAction(message, payload)
 	local action = tostring(payload.a or "")
 
@@ -1354,8 +1379,17 @@ function PartyInterference:EnsureWindow()
 
 	window.statusText = content:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 	window.statusText:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-	window.statusText:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
+	window.statusText:SetPoint("TOPRIGHT", content, "TOPRIGHT", -90, 0)
 	window.statusText:SetJustifyH("LEFT")
+
+	window.clearSelfButton = Form.CreateButton(content, {
+		text = "Clear Me",
+		width = 82,
+		onClick = function()
+			self:ClearSelf()
+		end,
+	})
+	window.clearSelfButton:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 2)
 
 	window.selectedText = content:CreateFontString(nil, "ARTWORK", "GameFontNormal")
 	window.selectedText:SetPoint("TOPLEFT", window.statusText, "BOTTOMLEFT", 0, -10)
@@ -1567,6 +1601,7 @@ function PartyInterference:RefreshWindow(statusText)
 
 	setButtonEnabled(window.startButton, canStart)
 	setButtonEnabled(window.clearButton, hasTarget)
+	setButtonEnabled(window.clearSelfButton, activeCount > 0)
 	setButtonEnabled(window.selectAllButton, #members > 0)
 	setButtonEnabled(window.clearTargetsButton, hasTarget)
 	setButtonEnabled(window.refreshButton, true)
@@ -1614,12 +1649,18 @@ function PartyInterference:OnDisabled()
 end
 
 function PartyInterference:HandleSlash(args)
+	local action = args[2]
+
+	if action == "clearself" or action == "clearme" or action == "clear-self" or action == "clear-me" then
+		self:ClearSelf()
+		return
+	end
+
 	if not self:IsEnabled() then
 		WEP:Print("Pranks is disabled. Open /wep to enable it.")
 		return
 	end
 
-	local action = args[2]
 	WEP:Log("Pranks", "slash", {
 		action = action or "menu",
 	})
@@ -1636,6 +1677,7 @@ function PartyInterference:HandleSlash(args)
 
 	WEP:Print("Usage: /wep pranks")
 	WEP:Print("Usage: /wep pranks status")
+	WEP:Print("Usage: /wep pranks clearself")
 end
 
 WEP:RegisterFeature(FEATURE_ID, Pranks)
